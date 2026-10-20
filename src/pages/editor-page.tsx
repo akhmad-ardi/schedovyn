@@ -1,13 +1,11 @@
 import { Link } from "react-router"
-import {
-  BookOpenIcon,
-  CalendarCheck2Icon,
-  ClockIcon,
-  GraduationCapIcon,
-  PlusIcon,
-  SparklesIcon,
-} from "lucide-react"
+import { DragDropProvider, type DragEndEvent } from "@dnd-kit/react"
+import { GraduationCapIcon, PlusIcon } from "lucide-react"
 import { ClassSelectorBar } from "@/components/layout/class-selector-bar"
+import { EditorToolbar } from "@/components/timetable/editor-toolbar"
+import { SessionDetailPanel } from "@/components/timetable/session-detail-panel"
+import { TimetableGrid } from "@/components/timetable/timetable-grid"
+import { UnscheduledPanel } from "@/components/timetable/unscheduled-panel"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -17,36 +15,110 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import {
-  getActiveClassRequirements,
   getActiveClassSessions,
   resolveActiveClass,
 } from "@/domain/timetable/active-class-context"
-import { DAY_OF_WEEK_LABELS } from "@/domain/types/entities"
-import { getSubjectColorStyle } from "@/lib/subject-colors"
+import {
+  calculateGridBoundaries,
+  clampMinutes,
+  offsetYToSnappedMinutes,
+  PIXELS_PER_MINUTE,
+} from "@/domain/timetable/grid-layout"
+import { minutesToTime, timeToMinutes } from "@/domain/time/time-utils"
+import type { UnscheduledSessionItem } from "@/domain/timetable/unscheduled-sessions"
+import type { DayOfWeek, TimetableSession } from "@/domain/types/entities"
 import { useWorkspaceStore } from "@/store/use-workspace-store"
 
 export function EditorPage() {
   const workspace = useWorkspaceStore((state) => state.workspace)
   const dayConfigs = useWorkspaceStore((state) => state.dayConfigs)
   const classes = useWorkspaceStore((state) => state.classes)
-  const subjects = useWorkspaceStore((state) => state.subjects)
-  const teachers = useWorkspaceStore((state) => state.teachers)
-  const rooms = useWorkspaceStore((state) => state.rooms)
-  const requirements = useWorkspaceStore((state) => state.requirements)
   const sessions = useWorkspaceStore((state) => state.sessions)
   const setActiveClass = useWorkspaceStore((state) => state.setActiveClass)
+  const placeUnscheduledSession = useWorkspaceStore(
+    (state) => state.placeUnscheduledSession
+  )
+  const moveSession = useWorkspaceStore((state) => state.moveSession)
 
   const activeClassId = workspace?.activeClassId ?? null
   const activeClass = resolveActiveClass(classes, activeClassId)
   const activeDaysCount = dayConfigs.filter((d) => d.isSchoolDay).length
+
+  // Handler untuk penyelesaian drag-and-drop kanvas jadwal
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { operation, canceled } = event
+    if (canceled || !operation) return
+
+    const source = operation.source
+    const target = operation.target
+    if (!source || !target) return
+
+    const targetData = target.data as
+      | { type: "day-column"; dayOfWeek: DayOfWeek }
+      | undefined
+
+    if (targetData?.type === "day-column" && targetData.dayOfWeek) {
+      const dayOfWeek = targetData.dayOfWeek
+      const dayConfig = dayConfigs.find((d) => d.dayOfWeek === dayOfWeek)
+      const boundaries = calculateGridBoundaries(dayConfigs)
+      const snapInterval = workspace?.defaultSnapIntervalMinutes ?? 15
+
+      // Hitung koordinat Y drop relatif terhadap kolom hari jika element target tersedia
+      let snappedMinutes: number | null = null
+      const targetEl = target.element as HTMLElement | undefined
+      const currentPos = operation.position?.current
+      if (targetEl && currentPos) {
+        const rect = targetEl.getBoundingClientRect()
+        const offsetY = Math.max(0, currentPos.y - rect.top)
+        snappedMinutes = offsetYToSnappedMinutes(
+          offsetY,
+          boundaries.originMinutes,
+          snapInterval,
+          PIXELS_PER_MINUTE
+        )
+      }
+
+      const minM = dayConfig
+        ? timeToMinutes(dayConfig.startTime)
+        : boundaries.originMinutes
+      const maxM = dayConfig
+        ? timeToMinutes(dayConfig.endTime)
+        : boundaries.maxMinutes
+
+      const sourceData = source.data as
+        | { type: "unscheduled-item"; item: UnscheduledSessionItem }
+        | { type: "scheduled-session"; session: TimetableSession }
+        | undefined
+
+      if (sourceData?.type === "unscheduled-item" && sourceData.item) {
+        const duration = sourceData.item.durationMinutes
+        const fallbackM = snappedMinutes ?? minM
+        const startM = clampMinutes(
+          fallbackM,
+          minM,
+          Math.max(minM, maxM - duration)
+        )
+        await placeUnscheduledSession({
+          requirementId: sourceData.item.requirementId,
+          dayOfWeek,
+          startTime: minutesToTime(startM),
+        })
+      } else if (sourceData?.type === "scheduled-session" && sourceData.session) {
+        const duration = sourceData.session.durationMinutes
+        const fallbackM = snappedMinutes ?? minM
+        const startM = clampMinutes(
+          fallbackM,
+          minM,
+          Math.max(minM, maxM - duration)
+        )
+        await moveSession({
+          sessionId: sourceData.session.id,
+          dayOfWeek,
+          startTime: minutesToTime(startM),
+        })
+      }
+    }
+  }
 
   // Kondisi 1: Belum ada kelas di ruang kerja
   if (classes.length === 0) {
@@ -140,230 +212,21 @@ export function EditorPage() {
     )
   }
 
-  // Kondisi 3: Kelas aktif terpilih
-  const activeClassRequirements = getActiveClassRequirements(
-    requirements,
-    activeClass.id
-  )
+  // Kondisi 3: Kelas aktif terpilih -> Kanvas Editor 3 Panel
   const activeClassSessions = getActiveClassSessions(sessions, activeClass.id)
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-1 flex-col">
       <ClassSelectorBar />
+      <EditorToolbar />
 
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 md:p-6">
-        {/* Header Konteks Kelas Aktif */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border border-border bg-card p-4">
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <h1 className="font-heading text-lg font-semibold tracking-tight text-foreground">
-                Kelas {activeClass.name}
-              </h1>
-              <span className="border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                Tingkat {activeClass.grade}
-              </span>
-            </div>
-            {activeClass.notes && (
-              <p className="text-xs text-muted-foreground">
-                {activeClass.notes}
-              </p>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5 border border-border bg-background px-2.5 py-1">
-              <ClockIcon className="size-3.5" />
-              <span className="tabular-nums">{activeDaysCount}</span> hari
-              sekolah aktif
-            </span>
-            <span className="inline-flex items-center gap-1.5 border border-border bg-background px-2.5 py-1">
-              <SparklesIcon className="size-3.5" />
-              Snap{" "}
-              <span className="tabular-nums">
-                {workspace?.defaultSnapIntervalMinutes ?? 15}
-              </span>{" "}
-              menit
-            </span>
-          </div>
+      <DragDropProvider onDragEnd={(e) => void handleDragEnd(e)}>
+        <div className="flex flex-1 min-h-[calc(100vh-8.5rem)] overflow-hidden">
+          <UnscheduledPanel />
+          <TimetableGrid sessions={activeClassSessions} />
+          <SessionDetailPanel />
         </div>
-
-        {/* Kartu 1: Kebutuhan Pembelajaran Kelas Aktif */}
-        <Card>
-          <CardHeader className="border-b border-border">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-col gap-1">
-                <div className="flex items-center gap-2">
-                  <BookOpenIcon className="size-4 text-primary" />
-                  <CardTitle>
-                    Kebutuhan Pembelajaran Kelas {activeClass.name}
-                  </CardTitle>
-                </div>
-                <CardDescription>
-                  Daftar alokasi mata pelajaran dan jumlah sesi mingguan khusus
-                  untuk kelas ini.
-                </CardDescription>
-              </div>
-              <Button asChild variant="outline" size="xs">
-                <Link to="/master-data">Atur di Data Master</Link>
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {activeClassRequirements.length === 0 ? (
-              <div className="flex flex-col items-start gap-1 py-4 text-xs text-muted-foreground">
-                <p className="font-medium text-foreground">
-                  Belum ada kebutuhan pembelajaran untuk kelas ini.
-                </p>
-                <p>
-                  Petakan mata pelajaran dan jumlah sesi mingguan di menu Data
-                  Master agar kartu sesi dapat dijadwalkan pada kelas ini.
-                </p>
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Mata Pelajaran</TableHead>
-                    <TableHead>Beban Mingguan</TableHead>
-                    <TableHead>Guru Default</TableHead>
-                    <TableHead>Ruangan Default</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {activeClassRequirements.map((req) => {
-                    const sub = subjects.find((s) => s.id === req.subjectId)
-                    const tch = teachers.find(
-                      (t) => t.id === req.defaultTeacherId
-                    )
-                    const rm = rooms.find((r) => r.id === req.defaultRoomId)
-                    const subStyle = sub
-                      ? getSubjectColorStyle(sub.colorKey)
-                      : null
-
-                    return (
-                      <TableRow key={req.id}>
-                        <TableCell>
-                          <div className="inline-flex items-center gap-2">
-                            {subStyle && (
-                              <span
-                                className={`inline-block size-2.5 shrink-0 ${subStyle.swatchClassName}`}
-                              />
-                            )}
-                            <span className="font-medium text-foreground">
-                              {sub?.name ?? "-"}
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="tabular-nums">
-                          {req.sessionsPerWeek} sesi x {req.durationMinutes} mnt
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {tch?.name ?? "Belum Ditentukan"}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {rm?.name ?? "Tanpa Ruangan Khusus"}
-                          {req.roomRequired ? " (Wajib)" : ""}
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Kartu 2: Sesi Terjadwal Kelas Aktif */}
-        <Card>
-          <CardHeader className="border-b border-border">
-            <div className="flex items-center gap-2">
-              <CalendarCheck2Icon className="size-4 text-primary" />
-              <div className="flex flex-col gap-1">
-                <CardTitle>
-                  Sesi Terjadwal Kelas {activeClass.name} (
-                  <span className="tabular-nums">
-                    {activeClassSessions.length}
-                  </span>
-                  )
-                </CardTitle>
-                <CardDescription>
-                  Sesi pembelajaran yang telah ditempatkan pada grid waktu
-                  mingguan kelas ini.
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {activeClassSessions.length === 0 ? (
-              <div className="flex flex-col items-start gap-1 py-4 text-xs text-muted-foreground">
-                <p className="font-medium text-foreground">
-                  Belum ada sesi terjadwal untuk kelas ini.
-                </p>
-                <p>
-                  Sesi pembelajaran dapat ditempatkan melalui editor grid pada
-                  tahap berikutnya (FR-04). Jadwal kelas lain tetap tersimpan
-                  aman di ruang kerja.
-                </p>
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Hari</TableHead>
-                    <TableHead>Waktu Belajar</TableHead>
-                    <TableHead>Durasi</TableHead>
-                    <TableHead>Mata Pelajaran</TableHead>
-                    <TableHead>Guru Pengajar</TableHead>
-                    <TableHead>Ruangan</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {activeClassSessions.map((ses) => {
-                    const sub = subjects.find((s) => s.id === ses.subjectId)
-                    const tch = teachers.find((t) => t.id === ses.teacherId)
-                    const rm = rooms.find((r) => r.id === ses.roomId)
-                    const subStyle = sub
-                      ? getSubjectColorStyle(sub.colorKey)
-                      : null
-
-                    return (
-                      <TableRow key={ses.id}>
-                        <TableCell className="font-medium text-foreground">
-                          {DAY_OF_WEEK_LABELS[ses.dayOfWeek]}
-                        </TableCell>
-                        <TableCell className="tabular-nums">
-                          {ses.startTime} - {ses.endTime}
-                        </TableCell>
-                        <TableCell className="tabular-nums">
-                          {ses.durationMinutes} menit
-                        </TableCell>
-                        <TableCell>
-                          <div className="inline-flex items-center gap-2">
-                            {subStyle && (
-                              <span
-                                className={`inline-block size-2.5 shrink-0 ${subStyle.swatchClassName}`}
-                              />
-                            )}
-                            <span className="font-medium text-foreground">
-                              {sub?.name ?? "-"}
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {tch?.name ?? "-"}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {rm?.name ?? "-"}
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      </DragDropProvider>
     </div>
   )
 }

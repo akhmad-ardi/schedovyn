@@ -545,3 +545,76 @@ export async function deleteTeachingRequirementCascade(
     }
   )
 }
+
+
+export async function saveTimetableSession(
+  workspace: Workspace,
+  session: TimetableSession,
+  database: SchedovynDatabase = defaultDb
+): Promise<Workspace> {
+  const updatedWorkspace: Workspace = {
+    ...workspace,
+    updatedAt: new Date().toISOString(),
+  }
+
+  await database.transaction(
+    "rw",
+    database.workspaces,
+    database.sessions,
+    async () => {
+      await database.sessions.put(session)
+      await database.workspaces.put(updatedWorkspace)
+    }
+  )
+
+  return updatedWorkspace
+}
+
+export async function batchSaveTimetableSessions(
+  workspace: Workspace,
+  sessions: TimetableSession[],
+  database: SchedovynDatabase = defaultDb
+): Promise<Workspace> {
+  const updatedWorkspace: Workspace = {
+    ...workspace,
+    updatedAt: new Date().toISOString(),
+  }
+
+  await database.transaction(
+    "rw",
+    database.workspaces,
+    database.sessions,
+    async () => {
+      await database.sessions.where("workspaceId").equals(workspace.id).delete()
+      if (sessions.length > 0) {
+        await database.sessions.bulkPut(sessions)
+      }
+      await database.workspaces.put(updatedWorkspace)
+    }
+  )
+
+  return updatedWorkspace
+}
+
+export async function deleteTimetableSession(
+  workspace: Workspace,
+  sessionId: string,
+  database: SchedovynDatabase = defaultDb
+): Promise<Workspace> {
+  const updatedWorkspace: Workspace = {
+    ...workspace,
+    updatedAt: new Date().toISOString(),
+  }
+
+  await database.transaction(
+    "rw",
+    database.workspaces,
+    database.sessions,
+    async () => {
+      await database.sessions.delete(sessionId)
+      await database.workspaces.put(updatedWorkspace)
+    }
+  )
+
+  return updatedWorkspace
+}

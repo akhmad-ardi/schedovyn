@@ -1,4 +1,5 @@
 import { create } from "zustand"
+import { minutesToTime, timeToMinutes } from "@/domain/time/time-utils"
 import * as workspaceRepo from "@/db/workspace-repository"
 import type {
   BreakInterval,
@@ -10,6 +11,7 @@ import type {
   Subject,
   Teacher,
   TeachingRequirement,
+  TimeString,
   TimetableSession,
   Workspace,
 } from "@/domain/types/entities"
@@ -36,6 +38,13 @@ export type SaveStatus = "idle" | "saving" | "saved" | "error"
 const LOCAL_SAVE_ERROR_MESSAGE =
   "Gagal menyimpan ke penyimpanan lokal browser. Periksa ruang penyimpanan browser Anda lalu klik Coba Simpan Ulang."
 
+
+export interface ScheduleHistorySnapshot {
+  actionLabel: string
+  timestamp: number
+  sessions: TimetableSession[]
+}
+
 export interface MasterDataMutationOutcome<T = void> {
   ok: boolean
   data?: T
@@ -60,6 +69,9 @@ export interface WorkspaceStoreState {
   saveStatus: SaveStatus
   lastSavedAt: string | null
   saveErrorMessage: string | null
+  selectedSessionId: string | null
+  historyPast: ScheduleHistorySnapshot[]
+  historyFuture: ScheduleHistorySnapshot[]
 
   bootWorkspace: () => Promise<void>
   updateWorkspaceIdentity: (patch: {
@@ -145,6 +157,38 @@ export interface WorkspaceStoreState {
 
   // Action FR-03: Pemilihan Kelas Aktif
   setActiveClass: (classId: string | null) => Promise<boolean>
+
+  // Actions FR-04: Editor Jadwal & Riwayat
+  selectSession: (sessionId: string | null) => void
+  placeUnscheduledSession: (params: {
+    requirementId: string
+    dayOfWeek: DayOfWeek
+    startTime: TimeString
+  }) => Promise<boolean>
+  moveSession: (params: {
+    sessionId: string
+    dayOfWeek: DayOfWeek
+    startTime: TimeString
+  }) => Promise<boolean>
+  updateSessionDetails: (params: {
+    sessionId: string
+    patch: Partial<
+      Pick<
+        TimetableSession,
+        | "teacherId"
+        | "roomId"
+        | "dayOfWeek"
+        | "startTime"
+        | "durationMinutes"
+        | "notes"
+      >
+    >
+  }) => Promise<boolean>
+  removeSession: (sessionId: string) => Promise<boolean>
+  undo: () => Promise<boolean>
+  redo: () => Promise<boolean>
+  canUndo: () => boolean
+  canRedo: () => boolean
 }
 
 export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
@@ -219,6 +263,9 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
     rooms: [],
     requirements: [],
     sessions: [],
+    selectedSessionId: null,
+    historyPast: [],
+    historyFuture: [],
     configValidation: { isValid: true, issues: [] },
     saveStatus: "idle",
     lastSavedAt: null,
@@ -1101,6 +1148,317 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         return true
       } catch (error) {
         console.error("Gagal menyimpan pilihan kelas aktif lokal:", error)
+        set({
+          saveStatus: "error",
+          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+        })
+        return false
+      }
+    },
+
+    selectSession: (sessionId) => {
+      set({ selectedSessionId: sessionId })
+    },
+
+    placeUnscheduledSession: async ({ requirementId, dayOfWeek, startTime }) => {
+      const { workspace, requirements, sessions, historyPast } = get()
+      if (!workspace) return false
+      const req = requirements.find((r) => r.id === requirementId)
+      if (!req) return false
+
+      const startM = timeToMinutes(startTime)
+      const endM = startM + req.durationMinutes
+      const endTime = minutesToTime(endM)
+
+      const newSession: TimetableSession = {
+        id: crypto.randomUUID(),
+        workspaceId: workspace.id,
+        requirementId: req.id,
+        classId: req.classId,
+        subjectId: req.subjectId,
+        teacherId: req.defaultTeacherId,
+        roomId: req.defaultRoomId,
+        dayOfWeek,
+        startTime,
+        endTime,
+        durationMinutes: req.durationMinutes,
+      }
+
+      const snapshot: ScheduleHistorySnapshot = {
+        actionLabel: "Aksi Jadwal",
+        timestamp: Date.now(),
+        sessions: structuredClone(sessions),
+      }
+
+      const nextSessions = [...sessions, newSession]
+      set({
+        historyPast: [...historyPast.slice(-49), snapshot],
+        historyFuture: [],
+        sessions: nextSessions,
+        selectedSessionId: newSession.id,
+        saveStatus: "saving",
+        saveErrorMessage: null,
+      })
+
+      try {
+        const savedWorkspace = await workspaceRepo.saveTimetableSession(
+          workspace,
+          newSession
+        )
+        set({
+          workspace: savedWorkspace,
+          saveStatus: "saved",
+          lastSavedAt: savedWorkspace.updatedAt,
+          saveErrorMessage: null,
+        })
+        return true
+      } catch {
+        set({
+          saveStatus: "error",
+          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+        })
+        return false
+      }
+    },
+
+    moveSession: async ({ sessionId, dayOfWeek, startTime }) => {
+      const { workspace, sessions, historyPast } = get()
+      if (!workspace) return false
+      const existing = sessions.find((s) => s.id === sessionId)
+      if (!existing) return false
+
+      const startM = timeToMinutes(startTime)
+      const endM = startM + existing.durationMinutes
+      const endTime = minutesToTime(endM)
+
+      const updatedSession: TimetableSession = {
+        ...existing,
+        dayOfWeek,
+        startTime,
+        endTime,
+      }
+
+      const snapshot: ScheduleHistorySnapshot = {
+        actionLabel: "Aksi Jadwal",
+        timestamp: Date.now(),
+        sessions: structuredClone(sessions),
+      }
+
+      const nextSessions = sessions.map((s) =>
+        s.id === sessionId ? updatedSession : s
+      )
+      set({
+        historyPast: [...historyPast.slice(-49), snapshot],
+        historyFuture: [],
+        sessions: nextSessions,
+        saveStatus: "saving",
+        saveErrorMessage: null,
+      })
+
+      try {
+        const savedWorkspace = await workspaceRepo.saveTimetableSession(
+          workspace,
+          updatedSession
+        )
+        set({
+          workspace: savedWorkspace,
+          saveStatus: "saved",
+          lastSavedAt: savedWorkspace.updatedAt,
+          saveErrorMessage: null,
+        })
+        return true
+      } catch {
+        set({
+          saveStatus: "error",
+          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+        })
+        return false
+      }
+    },
+
+    updateSessionDetails: async ({ sessionId, patch }) => {
+      const { workspace, sessions, historyPast } = get()
+      if (!workspace) return false
+      const existing = sessions.find((s) => s.id === sessionId)
+      if (!existing) return false
+
+      const startTime = patch.startTime ?? existing.startTime
+      const durationMinutes = patch.durationMinutes ?? existing.durationMinutes
+      const startM = timeToMinutes(startTime)
+      const endTime = minutesToTime(startM + durationMinutes)
+
+      const updatedSession: TimetableSession = {
+        ...existing,
+        ...patch,
+        startTime,
+        durationMinutes,
+        endTime,
+      }
+
+      const snapshot: ScheduleHistorySnapshot = {
+        actionLabel: "Ubah detail sesi",
+        timestamp: Date.now(),
+        sessions: structuredClone(sessions),
+      }
+
+      const nextSessions = sessions.map((s) =>
+        s.id === sessionId ? updatedSession : s
+      )
+      set({
+        historyPast: [...historyPast.slice(-49), snapshot],
+        historyFuture: [],
+        sessions: nextSessions,
+        saveStatus: "saving",
+        saveErrorMessage: null,
+      })
+
+      try {
+        const savedWorkspace = await workspaceRepo.saveTimetableSession(
+          workspace,
+          updatedSession
+        )
+        set({
+          workspace: savedWorkspace,
+          saveStatus: "saved",
+          lastSavedAt: savedWorkspace.updatedAt,
+          saveErrorMessage: null,
+        })
+        return true
+      } catch {
+        set({
+          saveStatus: "error",
+          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+        })
+        return false
+      }
+    },
+
+    removeSession: async (sessionId) => {
+      const { workspace, sessions, historyPast, selectedSessionId } = get()
+      if (!workspace) return false
+      const existing = sessions.find((s) => s.id === sessionId)
+      if (!existing) return false
+
+      const snapshot: ScheduleHistorySnapshot = {
+        actionLabel: "Lepas sesi dari grid",
+        timestamp: Date.now(),
+        sessions: structuredClone(sessions),
+      }
+
+      const nextSessions = sessions.filter((s) => s.id !== sessionId)
+      set({
+        historyPast: [...historyPast.slice(-49), snapshot],
+        historyFuture: [],
+        sessions: nextSessions,
+        selectedSessionId: selectedSessionId === sessionId ? null : selectedSessionId,
+        saveStatus: "saving",
+        saveErrorMessage: null,
+      })
+
+      try {
+        const savedWorkspace = await workspaceRepo.deleteTimetableSession(
+          workspace,
+          sessionId
+        )
+        set({
+          workspace: savedWorkspace,
+          saveStatus: "saved",
+          lastSavedAt: savedWorkspace.updatedAt,
+          saveErrorMessage: null,
+        })
+        return true
+      } catch {
+        set({
+          saveStatus: "error",
+          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+        })
+        return false
+      }
+    },
+
+    canUndo: () => get().historyPast.length > 0,
+    canRedo: () => get().historyFuture.length > 0,
+
+    undo: async () => {
+      const { historyPast, historyFuture, sessions, workspace } = get()
+      if (historyPast.length === 0 || !workspace) return false
+
+      const previousSnapshot = historyPast[historyPast.length - 1]
+      const currentSnapshot: ScheduleHistorySnapshot = {
+        actionLabel: "Current State",
+        timestamp: Date.now(),
+        sessions: structuredClone(sessions),
+      }
+
+      const newHistoryPast = historyPast.slice(0, -1)
+      const newHistoryFuture = [currentSnapshot, ...historyFuture]
+      const targetSessions = structuredClone(previousSnapshot.sessions)
+
+      set({
+        historyPast: newHistoryPast,
+        historyFuture: newHistoryFuture,
+        sessions: targetSessions,
+        saveStatus: "saving",
+        saveErrorMessage: null,
+      })
+
+      try {
+        const savedWorkspace = await workspaceRepo.batchSaveTimetableSessions(
+          workspace,
+          targetSessions
+        )
+        set({
+          workspace: savedWorkspace,
+          saveStatus: "saved",
+          lastSavedAt: savedWorkspace.updatedAt,
+          saveErrorMessage: null,
+        })
+        return true
+      } catch {
+        set({
+          saveStatus: "error",
+          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+        })
+        return false
+      }
+    },
+
+    redo: async () => {
+      const { historyPast, historyFuture, sessions, workspace } = get()
+      if (historyFuture.length === 0 || !workspace) return false
+
+      const nextSnapshot = historyFuture[0]
+      const currentSnapshot: ScheduleHistorySnapshot = {
+        actionLabel: "Current State",
+        timestamp: Date.now(),
+        sessions: structuredClone(sessions),
+      }
+
+      const newHistoryFuture = historyFuture.slice(1)
+      const newHistoryPast = [...historyPast, currentSnapshot]
+      const targetSessions = structuredClone(nextSnapshot.sessions)
+
+      set({
+        historyPast: newHistoryPast,
+        historyFuture: newHistoryFuture,
+        sessions: targetSessions,
+        saveStatus: "saving",
+        saveErrorMessage: null,
+      })
+
+      try {
+        const savedWorkspace = await workspaceRepo.batchSaveTimetableSessions(
+          workspace,
+          targetSessions
+        )
+        set({
+          workspace: savedWorkspace,
+          saveStatus: "saved",
+          lastSavedAt: savedWorkspace.updatedAt,
+          saveErrorMessage: null,
+        })
+        return true
+      } catch {
         set({
           saveStatus: "error",
           saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
