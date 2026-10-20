@@ -1,7 +1,7 @@
 import { createBrowserRouter } from "react-router"
 
 import { AppShell } from "@/components/layout/app-shell"
-import { MainPage } from "@/pages/main-page"
+import { EditorPage } from "@/pages/editor-page"
 import { MasterDataPage } from "@/pages/master-data-page"
 import { SettingsPage } from "@/pages/settings-page"
 
@@ -11,7 +11,7 @@ export const router = createBrowserRouter([
     children: [
       {
         path: "/",
-        element: <MainPage />,
+        element: <EditorPage />,
       },
       {
         path: "/master-data",

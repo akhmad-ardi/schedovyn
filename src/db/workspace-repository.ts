@@ -97,8 +97,24 @@ export async function loadOrSeedWorkspace(
             .toArray(),
         ])
 
+        let resolvedWorkspace = workspace
+        const resolvedActiveClassId =
+          workspace.activeClassId !== null &&
+          classes.some((c) => c.id === workspace.activeClassId)
+            ? workspace.activeClassId
+            : (classes[0]?.id ?? null)
+
+        if (resolvedActiveClassId !== workspace.activeClassId) {
+          resolvedWorkspace = {
+            ...workspace,
+            activeClassId: resolvedActiveClassId,
+            updatedAt: new Date().toISOString(),
+          }
+          await database.workspaces.put(resolvedWorkspace)
+        }
+
         return {
-          workspace,
+          workspace: resolvedWorkspace,
           dayConfigs: sortDayConfigs(rawDays),
           classes,
           subjects,
@@ -146,6 +162,24 @@ export async function saveWorkspaceAndDayConfigs(
       await database.dayConfigs.bulkPut(dayConfigs)
     }
   )
+
+  return updatedWorkspace
+}
+
+export async function setActiveClassInWorkspace(
+  workspace: Workspace,
+  activeClassId: string | null,
+  database: SchedovynDatabase = defaultDb
+): Promise<Workspace> {
+  const updatedWorkspace: Workspace = {
+    ...workspace,
+    activeClassId,
+    updatedAt: new Date().toISOString(),
+  }
+
+  await database.transaction("rw", database.workspaces, async () => {
+    await database.workspaces.put(updatedWorkspace)
+  })
 
   return updatedWorkspace
 }

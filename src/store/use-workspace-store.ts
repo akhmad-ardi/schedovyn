@@ -142,6 +142,9 @@ export interface WorkspaceStoreState {
     input: TeachingRequirementInput
   ) => Promise<MasterDataMutationOutcome<TeachingRequirement>>
   deleteTeachingRequirement: (requirementId: string) => Promise<boolean>
+
+  // Action FR-03: Pemilihan Kelas Aktif
+  setActiveClass: (classId: string | null) => Promise<boolean>
 }
 
 export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
@@ -1051,6 +1054,53 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         }))
         return true
       } catch {
+        set({
+          saveStatus: "error",
+          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+        })
+        return false
+      }
+    },
+
+    setActiveClass: async (classId: string | null) => {
+      const { workspace, classes } = get()
+      if (!workspace) {
+        return false
+      }
+
+      if (classId !== null && !classes.some((cls) => cls.id === classId)) {
+        return false
+      }
+
+      if (workspace.activeClassId === classId && get().saveStatus !== "error") {
+        return true
+      }
+
+      const nextWorkspace: Workspace = {
+        ...workspace,
+        activeClassId: classId,
+      }
+
+      set({
+        workspace: nextWorkspace,
+        saveStatus: "saving",
+        saveErrorMessage: null,
+      })
+
+      try {
+        const savedWorkspace = await workspaceRepo.setActiveClassInWorkspace(
+          nextWorkspace,
+          classId
+        )
+        set({
+          workspace: savedWorkspace,
+          saveStatus: "saved",
+          lastSavedAt: savedWorkspace.updatedAt,
+          saveErrorMessage: null,
+        })
+        return true
+      } catch (error) {
+        console.error("Gagal menyimpan pilihan kelas aktif lokal:", error)
         set({
           saveStatus: "error",
           saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
