@@ -50,6 +50,48 @@ export const SNAP_INTERVAL_OPTIONS: readonly SnapIntervalMinutes[] = [
   5, 10, 15, 30, 60,
 ] as const
 
+export const ROOM_TYPE_OPTIONS: readonly RoomType[] = [
+  "classroom",
+  "laboratory",
+  "sports",
+  "hall",
+  "other",
+] as const
+
+export const ROOM_TYPE_LABELS: Record<RoomType, string> = {
+  classroom: "Ruang Kelas",
+  laboratory: "Laboratorium",
+  sports: "Lapangan / Olahraga",
+  hall: "Aula",
+  other: "Lainnya",
+}
+
+export const SUBJECT_COLOR_OPTIONS: readonly SubjectColorKey[] = [
+  "blue",
+  "emerald",
+  "amber",
+  "rose",
+  "violet",
+  "cyan",
+  "orange",
+  "teal",
+  "indigo",
+  "slate",
+] as const
+
+export const SUBJECT_COLOR_LABELS: Record<SubjectColorKey, string> = {
+  blue: "Biru",
+  emerald: "Zamrud",
+  amber: "Kuning Amber",
+  rose: "Merah Muda",
+  violet: "Ungu Violet",
+  cyan: "Biru Sian",
+  orange: "Oranye",
+  teal: "Hijau Toska",
+  indigo: "Nila (Indigo)",
+  slate: "Abu-abu Batu",
+}
+
 export interface TimeInterval {
   id: string
   dayOfWeek: DayOfWeek
