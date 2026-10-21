@@ -1,9 +1,21 @@
 import * as React from "react"
-import { ClockIcon, InfoIcon, XIcon } from "lucide-react"
+import {
+  AlertCircleIcon,
+  AlertTriangleIcon,
+  ClockIcon,
+  InfoIcon,
+  XIcon,
+} from "lucide-react"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { DAY_OF_WEEK_LABELS, type DayOfWeek, type TimeString, type TimetableSession } from "@/domain/types/entities"
+import {
+  DAY_OF_WEEK_LABELS,
+  type DayOfWeek,
+  type TimeString,
+  type TimetableSession,
+} from "@/domain/types/entities"
 import { getSubjectColorStyle } from "@/lib/subject-colors"
 import { useWorkspaceStore } from "@/store/use-workspace-store"
 
@@ -18,19 +30,31 @@ function SessionDetailForm({ session, onClose }: SessionDetailFormProps) {
   const rooms = useWorkspaceStore((state) => state.rooms)
   const classes = useWorkspaceStore((state) => state.classes)
   const dayConfigs = useWorkspaceStore((state) => state.dayConfigs)
-  const updateSessionDetails = useWorkspaceStore((state) => state.updateSessionDetails)
+  const updateSessionDetails = useWorkspaceStore(
+    (state) => state.updateSessionDetails
+  )
   const removeSession = useWorkspaceStore((state) => state.removeSession)
+  const getSessionConflicts = useWorkspaceStore(
+    (state) => state.getSessionConflicts
+  )
+  const getSessionWarnings = useWorkspaceStore(
+    (state) => state.getSessionWarnings
+  )
 
   const subject = subjects.find((s) => s.id === session.subjectId)
   const classGroup = classes.find((c) => c.id === session.classId)
 
   const [startTime, setStartTime] = React.useState<string>(session.startTime)
   const [dayOfWeek, setDayOfWeek] = React.useState<DayOfWeek>(session.dayOfWeek)
-  const [teacherId, setTeacherId] = React.useState<string | null>(session.teacherId)
+  const [teacherId, setTeacherId] = React.useState<string | null>(
+    session.teacherId
+  )
   const [roomId, setRoomId] = React.useState<string | null>(session.roomId)
   const [notes, setNotes] = React.useState<string>(session.notes ?? "")
 
   const colorStyle = subject ? getSubjectColorStyle(subject.colorKey) : null
+  const sessionConflicts = getSessionConflicts(session.id)
+  const sessionWarnings = getSessionWarnings(session.id)
 
   const handleSave = async () => {
     await updateSessionDetails({
@@ -83,9 +107,35 @@ function SessionDetailForm({ session, onClose }: SessionDetailFormProps) {
             </span>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            Kelas {classGroup?.name ?? "-"} &middot; {session.durationMinutes} menit
+            Kelas {classGroup?.name ?? "-"} &middot; {session.durationMinutes}{" "}
+            menit
           </p>
         </div>
+
+        {/* Notifikasi Konflik Jadwal (Multi-Cue Visual) */}
+        {sessionConflicts.map((c) => (
+          <Alert key={c.id} variant="destructive">
+            <AlertCircleIcon className="size-4 shrink-0" />
+            <AlertTitle className="text-xs font-bold">{c.title}</AlertTitle>
+            <AlertDescription className="text-xs">
+              {c.description}
+            </AlertDescription>
+          </Alert>
+        ))}
+
+        {/* Notifikasi Peringatan Kelengkapan */}
+        {sessionWarnings.map((w) => (
+          <Alert
+            key={w.id}
+            className="border-amber-500/40 text-amber-800 dark:text-amber-200"
+          >
+            <AlertTriangleIcon className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <AlertTitle className="text-xs font-semibold">{w.title}</AlertTitle>
+            <AlertDescription className="text-xs text-amber-700 dark:text-amber-300">
+              {w.description}
+            </AlertDescription>
+          </Alert>
+        ))}
 
         {/* Form Sunting Presisi */}
         <div className="flex flex-col gap-3">
@@ -115,7 +165,8 @@ function SessionDetailForm({ session, onClose }: SessionDetailFormProps) {
             >
               {dayConfigs.map((d) => (
                 <option key={d.dayOfWeek} value={d.dayOfWeek}>
-                  {DAY_OF_WEEK_LABELS[d.dayOfWeek]} {d.isSchoolDay ? "" : "(Libur)"}
+                  {DAY_OF_WEEK_LABELS[d.dayOfWeek]}{" "}
+                  {d.isSchoolDay ? "" : "(Libur)"}
                 </option>
               ))}
             </select>
@@ -128,7 +179,9 @@ function SessionDetailForm({ session, onClose }: SessionDetailFormProps) {
               aria-label="Guru Pengajar"
               className="flex h-8 w-full border border-input bg-background px-2.5 py-1 text-xs text-foreground outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50"
               value={teacherId ?? ""}
-              onChange={(e) => setTeacherId(e.target.value ? e.target.value : null)}
+              onChange={(e) =>
+                setTeacherId(e.target.value ? e.target.value : null)
+              }
             >
               <option value="">-- Tanpa Guru --</option>
               {teachers.map((t) => (
@@ -146,7 +199,9 @@ function SessionDetailForm({ session, onClose }: SessionDetailFormProps) {
               aria-label="Ruangan"
               className="flex h-8 w-full border border-input bg-background px-2.5 py-1 text-xs text-foreground outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50"
               value={roomId ?? ""}
-              onChange={(e) => setRoomId(e.target.value ? e.target.value : null)}
+              onChange={(e) =>
+                setRoomId(e.target.value ? e.target.value : null)
+              }
             >
               <option value="">-- Tanpa Ruangan Khusus --</option>
               {rooms.map((r) => (
@@ -199,11 +254,14 @@ function SessionDetailForm({ session, onClose }: SessionDetailFormProps) {
 }
 
 export function SessionDetailPanel() {
-  const selectedSessionId = useWorkspaceStore((state) => state.selectedSessionId)
+  const selectedSessionId = useWorkspaceStore(
+    (state) => state.selectedSessionId
+  )
   const sessions = useWorkspaceStore((state) => state.sessions)
   const selectSession = useWorkspaceStore((state) => state.selectSession)
 
-  const selectedSession = sessions.find((s) => s.id === selectedSessionId) ?? null
+  const selectedSession =
+    sessions.find((s) => s.id === selectedSessionId) ?? null
 
   return (
     <aside
@@ -238,7 +296,8 @@ export function SessionDetailPanel() {
             Tidak ada sesi yang dipilih
           </p>
           <p className="mt-1">
-            Klik salah satu blok sesi pada grid untuk melihat informasi lengkap atau menyunting waktu, guru, dan ruangan.
+            Klik salah satu blok sesi pada grid untuk melihat informasi lengkap
+            atau menyunting waktu, guru, dan ruangan.
           </p>
         </div>
       ) : (

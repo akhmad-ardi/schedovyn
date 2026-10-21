@@ -1,6 +1,10 @@
 import * as React from "react"
 import { useDraggable } from "@dnd-kit/react"
-import { GripVerticalIcon } from "lucide-react"
+import {
+  AlertCircleIcon,
+  AlertTriangleIcon,
+  GripVerticalIcon,
+} from "lucide-react"
 import {
   calculateKeyboardTimeShift,
   durationToGridHeightPx,
@@ -47,8 +51,46 @@ export function SessionBlock({
   const selectSession = useWorkspaceStore((state) => state.selectSession)
   const moveSession = useWorkspaceStore((state) => state.moveSession)
   const removeSession = useWorkspaceStore((state) => state.removeSession)
+  const validationReport = useWorkspaceStore((state) => state.validationReport)
 
   const isSelected = selectedSessionId === session.id
+
+  const sessionConflicts =
+    validationReport?.conflictsBySessionId[session.id] ?? []
+  const sessionWarnings =
+    validationReport?.warningsBySessionId[session.id] ?? []
+  const hasConflict = sessionConflicts.length > 0
+  const hasWarning = sessionWarnings.length > 0
+
+  let conflictLabel: string | null = null
+  if (hasConflict) {
+    const first = sessionConflicts[0]
+    switch (first.conflictType) {
+      case "TEACHER_OVERLAP":
+        conflictLabel = "Bentrokan Guru"
+        break
+      case "ROOM_OVERLAP":
+        conflictLabel = "Bentrokan Ruangan"
+        break
+      case "CLASS_OVERLAP":
+        conflictLabel = "Bentrokan Kelas"
+        break
+      case "TEACHER_UNAVAILABLE":
+        conflictLabel = "Guru Tidak Bersedia"
+        break
+      case "ROOM_UNAVAILABLE":
+        conflictLabel = "Ruangan Tidak Tersedia"
+        break
+      case "OUTSIDE_OPERATING_HOURS":
+        conflictLabel = "Di Luar Jam Belajar"
+        break
+      case "BREAK_TIME_OVERLAP":
+        conflictLabel = "Bentrokan Istirahat"
+        break
+      default:
+        conflictLabel = "Konflik Jadwal"
+    }
+  }
 
   const { ref, isDragging, handleRef } = useDraggable({
     id: session.id,
@@ -146,6 +188,7 @@ export function SessionBlock({
       ref={ref}
       role="article"
       aria-label={ariaLabel}
+      data-conflict={hasConflict ? "true" : undefined}
       tabIndex={0}
       onClick={(e) => {
         e.stopPropagation()
@@ -159,7 +202,9 @@ export function SessionBlock({
         width: `${widthPercent}%`,
       }}
       className={`absolute box-border overflow-hidden border p-1.5 transition-shadow select-none outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:z-30 ${
-        colorStyle.blockClassName
+        hasConflict
+          ? "border-2 border-destructive bg-destructive/15 text-destructive-foreground ring-1 ring-destructive/40"
+          : colorStyle.blockClassName
       } ${
         isSelected
           ? "ring-2 ring-primary z-20 shadow-md"
@@ -169,12 +214,32 @@ export function SessionBlock({
       <div className="flex h-full flex-col justify-between overflow-hidden">
         <div className="flex items-start justify-between gap-1">
           <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-semibold leading-tight text-foreground">
-              {subjectName}
-            </p>
+            <div className="flex items-center gap-1 min-w-0">
+              {hasConflict && (
+                <AlertCircleIcon
+                  data-testid="session-conflict-icon"
+                  className="size-3 text-destructive shrink-0"
+                />
+              )}
+              {!hasConflict && hasWarning && (
+                <AlertTriangleIcon className="size-3 text-amber-600 dark:text-amber-400 shrink-0" />
+              )}
+              <p
+                className={`truncate text-xs font-semibold leading-tight ${
+                  hasConflict ? "text-destructive font-bold" : "text-foreground"
+                }`}
+              >
+                {subjectName}
+              </p>
+            </div>
             <p className="truncate text-[10px] tabular-nums text-muted-foreground">
               {session.startTime} - {session.endTime}
             </p>
+            {hasConflict && conflictLabel && (
+              <span className="mt-0.5 inline-block truncate border border-destructive/40 bg-destructive/20 px-1 py-0.2 text-[9px] font-bold text-destructive">
+                {conflictLabel}
+              </span>
+            )}
           </div>
           <button
             ref={handleRef}

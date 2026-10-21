@@ -2,6 +2,14 @@ import { create } from "zustand"
 import { minutesToTime, timeToMinutes } from "@/domain/time/time-utils"
 import * as workspaceRepo from "@/db/workspace-repository"
 import type {
+  CompletenessWarning,
+  ScheduleConflict,
+  ScopeValidationSummary,
+  WorkspaceValidationReport,
+} from "@/domain/types/validation"
+import { evaluateWorkspaceValidation } from "@/domain/validation/workspace-validator"
+
+import type {
   BreakInterval,
   ClassGroup,
   DayOfWeek,
@@ -72,6 +80,12 @@ export interface WorkspaceStoreState {
   selectedSessionId: string | null
   historyPast: ScheduleHistorySnapshot[]
   historyFuture: ScheduleHistorySnapshot[]
+  validationReport: WorkspaceValidationReport | null
+
+  revalidateWorkspace: () => void
+  getActiveClassValidationSummary: () => ScopeValidationSummary | null
+  getSessionConflicts: (sessionId: string) => ScheduleConflict[]
+  getSessionWarnings: (sessionId: string) => CompletenessWarning[]
 
   bootWorkspace: () => Promise<void>
   updateWorkspaceIdentity: (patch: {
@@ -194,6 +208,41 @@ export interface WorkspaceStoreState {
 export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
   let mutationSequence = 0
 
+  const runValidation = (
+    overrideState?: Partial<{
+      dayConfigs: DayScheduleConfig[]
+      classes: ClassGroup[]
+      teachers: Teacher[]
+      rooms: Room[]
+      subjects: Subject[]
+      requirements: TeachingRequirement[]
+      sessions: TimetableSession[]
+      workspace: Workspace | null
+    }>
+  ): WorkspaceValidationReport => {
+    const currentState = get()
+    const dayConfigs = overrideState?.dayConfigs ?? currentState.dayConfigs
+    const classes = overrideState?.classes ?? currentState.classes
+    const teachers = overrideState?.teachers ?? currentState.teachers
+    const rooms = overrideState?.rooms ?? currentState.rooms
+    const subjects = overrideState?.subjects ?? currentState.subjects
+    const requirements = overrideState?.requirements ?? currentState.requirements
+    const sessions = overrideState?.sessions ?? currentState.sessions
+    const workspace = overrideState?.workspace !== undefined ? overrideState.workspace : currentState.workspace
+
+    return evaluateWorkspaceValidation({
+      dayConfigs,
+      classes,
+      teachers,
+      rooms,
+      subjects,
+      requirements,
+      sessions,
+      activeClassId: workspace?.activeClassId ?? null,
+    })
+  }
+
+
   const applyAndPersistConfig = async (
     nextWorkspace: Workspace,
     nextDayConfigs: DayScheduleConfig[]
@@ -266,6 +315,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
     selectedSessionId: null,
     historyPast: [],
     historyFuture: [],
+    validationReport: null,
     configValidation: { isValid: true, issues: [] },
     saveStatus: "idle",
     lastSavedAt: null,
@@ -284,6 +334,17 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           bundle.dayConfigs
         )
 
+        const validationReport = evaluateWorkspaceValidation({
+          dayConfigs: bundle.dayConfigs,
+          classes: bundle.classes ?? [],
+          teachers: bundle.teachers ?? [],
+          rooms: bundle.rooms ?? [],
+          subjects: bundle.subjects ?? [],
+          requirements: bundle.requirements ?? [],
+          sessions: bundle.sessions ?? [],
+          activeClassId: bundle.workspace.activeClassId ?? null,
+        })
+
         set({
           isHydrated: true,
           isHydrating: false,
@@ -295,6 +356,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           rooms: bundle.rooms ?? [],
           requirements: bundle.requirements ?? [],
           sessions: bundle.sessions ?? [],
+          validationReport,
           configValidation,
           saveStatus: "saved",
           lastSavedAt: bundle.workspace.updatedAt,
@@ -1130,6 +1192,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
 
       set({
         workspace: nextWorkspace,
+        validationReport: runValidation({ workspace: nextWorkspace }),
         saveStatus: "saving",
         saveErrorMessage: null,
       })
@@ -1196,6 +1259,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         historyFuture: [],
         sessions: nextSessions,
         selectedSessionId: newSession.id,
+        validationReport: runValidation({ sessions: nextSessions }),
         saveStatus: "saving",
         saveErrorMessage: null,
       })
@@ -1251,6 +1315,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         historyPast: [...historyPast.slice(-49), snapshot],
         historyFuture: [],
         sessions: nextSessions,
+        validationReport: runValidation({ sessions: nextSessions }),
         saveStatus: "saving",
         saveErrorMessage: null,
       })
@@ -1308,6 +1373,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         historyPast: [...historyPast.slice(-49), snapshot],
         historyFuture: [],
         sessions: nextSessions,
+        validationReport: runValidation({ sessions: nextSessions }),
         saveStatus: "saving",
         saveErrorMessage: null,
       })
@@ -1350,7 +1416,9 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         historyPast: [...historyPast.slice(-49), snapshot],
         historyFuture: [],
         sessions: nextSessions,
-        selectedSessionId: selectedSessionId === sessionId ? null : selectedSessionId,
+        selectedSessionId:
+          selectedSessionId === sessionId ? null : selectedSessionId,
+        validationReport: runValidation({ sessions: nextSessions }),
         saveStatus: "saving",
         saveErrorMessage: null,
       })
@@ -1376,6 +1444,28 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
       }
     },
 
+    revalidateWorkspace: () => {
+      set({ validationReport: runValidation() })
+    },
+
+    getActiveClassValidationSummary: () => {
+      const { validationReport, workspace } = get()
+      if (!validationReport || !workspace?.activeClassId) return null
+      return validationReport.byClassId[workspace.activeClassId] ?? null
+    },
+
+    getSessionConflicts: (sessionId: string) => {
+      const { validationReport } = get()
+      if (!validationReport) return []
+      return validationReport.conflictsBySessionId[sessionId] ?? []
+    },
+
+    getSessionWarnings: (sessionId: string) => {
+      const { validationReport } = get()
+      if (!validationReport) return []
+      return validationReport.warningsBySessionId[sessionId] ?? []
+    },
+
     canUndo: () => get().historyPast.length > 0,
     canRedo: () => get().historyFuture.length > 0,
 
@@ -1398,6 +1488,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         historyPast: newHistoryPast,
         historyFuture: newHistoryFuture,
         sessions: targetSessions,
+        validationReport: runValidation({ sessions: targetSessions }),
         saveStatus: "saving",
         saveErrorMessage: null,
       })
@@ -1442,6 +1533,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         historyPast: newHistoryPast,
         historyFuture: newHistoryFuture,
         sessions: targetSessions,
+        validationReport: runValidation({ sessions: targetSessions }),
         saveStatus: "saving",
         saveErrorMessage: null,
       })
