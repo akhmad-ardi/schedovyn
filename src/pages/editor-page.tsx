@@ -1,3 +1,4 @@
+import { useEffect } from "react"
 import { Link } from "react-router"
 import { DragDropProvider, type DragEndEvent } from "@dnd-kit/react"
 import { GraduationCapIcon, PlusIcon } from "lucide-react"
@@ -39,6 +40,63 @@ export function EditorPage() {
     (state) => state.placeUnscheduledSession
   )
   const moveSession = useWorkspaceStore((state) => state.moveSession)
+  const undo = useWorkspaceStore((state) => state.undo)
+  const redo = useWorkspaceStore((state) => state.redo)
+  const canUndo = useWorkspaceStore((state) => state.canUndo)
+  const canRedo = useWorkspaceStore((state) => state.canRedo)
+
+  // Global Keyboard Shortcuts (Ctrl+Z / Cmd+Z untuk Undo, Ctrl+Y / Ctrl+Shift+Z untuk Redo)
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // 1. Isolasi Form & Input editable (AC-FR07-09)
+      const target = event.target as HTMLElement | null
+      if (target) {
+        const tagName = target.tagName ? target.tagName.toUpperCase() : ""
+        if (
+          tagName === "INPUT" ||
+          tagName === "TEXTAREA" ||
+          tagName === "SELECT" ||
+          target.isContentEditable
+        ) {
+          return
+        }
+      }
+
+      const isMac =
+        typeof navigator !== "undefined" &&
+        /Mac|iPod|iPhone|iPad/.test(navigator.userAgent)
+      const modifier = isMac ? event.metaKey : event.ctrlKey
+
+      if (!modifier) return
+
+      const key = event.key.toLowerCase()
+
+      // Redo: Ctrl+Y atau Ctrl+Shift+Z (atau Cmd+Shift+Z pada Mac)
+      const isRedo =
+        (key === "y" && !event.shiftKey) ||
+        (key === "z" && event.shiftKey)
+
+      // Undo: Ctrl+Z atau Cmd+Z (tanpa shift)
+      const isUndo = key === "z" && !event.shiftKey
+
+      if (isRedo) {
+        event.preventDefault()
+        if (canRedo()) {
+          void redo()
+        }
+      } else if (isUndo) {
+        event.preventDefault()
+        if (canUndo()) {
+          void undo()
+        }
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [undo, redo, canUndo, canRedo])
 
   const activeClassId = workspace?.activeClassId ?? null
   const activeClass = resolveActiveClass(classes, activeClassId)

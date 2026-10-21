@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
-import { calculateUnscheduledSessions } from "@/domain/timetable/unscheduled-sessions"
+import {
+  calculateUnscheduledSessions,
+  type UnscheduledSessionItem,
+} from "@/domain/timetable/unscheduled-sessions"
 import type { TeachingRequirement, TimetableSession } from "@/domain/types/entities"
 
 describe("FR-04.A & AC-08: calculateUnscheduledSessions", () => {
@@ -26,15 +29,16 @@ describe("FR-04.A & AC-08: calculateUnscheduledSessions", () => {
     sessionsPerWeek: 2,
     durationMinutes: 90,
     roomRequired: false,
+    notes: "Bahasa Inggris Peminatan",
   }
 
   const reqOtherClass: TeachingRequirement = {
-    id: "req-8a-math",
+    id: "req-other",
     workspaceId: "ws-1",
     classId: "cls-8a",
     subjectId: "sub-math",
     defaultTeacherId: "tch-1",
-    defaultRoomId: null,
+    defaultRoomId: "rm-1",
     sessionsPerWeek: 4,
     durationMinutes: 45,
     roomRequired: false,
@@ -45,9 +49,12 @@ describe("FR-04.A & AC-08: calculateUnscheduledSessions", () => {
     expect(summary).toEqual({
       classId: "cls-7a",
       items: [],
+      bySubject: [],
       totalRequiredSessions: 0,
       totalScheduledSessions: 0,
       totalRemainingSessions: 0,
+      overallCompletionPercentage: 100,
+      isFullyScheduled: false,
     })
   })
 
@@ -100,17 +107,17 @@ describe("FR-04.A & AC-08: calculateUnscheduledSessions", () => {
         durationMinutes: 45,
       },
       {
-        id: "ses-math-2",
+        id: "ses-eng-1",
         workspaceId: "ws-1",
-        requirementId: "req-math",
+        requirementId: "req-eng",
         classId: "cls-7a",
-        subjectId: "sub-math",
-        teacherId: "tch-1",
-        roomId: "rm-1",
+        subjectId: "sub-eng",
+        teacherId: "tch-2",
+        roomId: null,
         dayOfWeek: "tuesday",
-        startTime: "07:45",
-        endTime: "08:30",
-        durationMinutes: 45,
+        startTime: "08:00",
+        endTime: "09:30",
+        durationMinutes: 90,
       },
     ]
 
@@ -120,77 +127,63 @@ describe("FR-04.A & AC-08: calculateUnscheduledSessions", () => {
       "cls-7a"
     )
 
+    // Math: 3 - 1 = 2 sesi tersisa
+    // Eng: 2 - 1 = 1 sesi tersisa
     expect(summary.totalRequiredSessions).toBe(5)
     expect(summary.totalScheduledSessions).toBe(2)
-    expect(summary.totalRemainingSessions).toBe(3) // 1 math + 2 eng
+    expect(summary.totalRemainingSessions).toBe(3)
+    expect(summary.items).toHaveLength(3)
 
-    const mathItems = summary.items.filter((item) => item.requirementId === "req-math")
-    expect(mathItems).toHaveLength(1)
-    expect(mathItems[0].virtualId).toBe("req-math::slot-0")
-    expect(mathItems[0].remainingCount).toBe(1)
-    expect(mathItems[0].totalRequiredCount).toBe(3)
+    const remainingMath = summary.items.filter(
+      (item) => item.requirementId === "req-math"
+    )
+    expect(remainingMath).toHaveLength(2)
+    expect(remainingMath[0].remainingCount).toBe(2)
+    expect(remainingMath[1].remainingCount).toBe(2)
+
+    const remainingEng = summary.items.filter(
+      (item) => item.requirementId === "req-eng"
+    )
+    expect(remainingEng).toHaveLength(1)
+    expect(remainingEng[0].remainingCount).toBe(1)
   })
 
   it("4. menghasilkan array kosong untuk kebutuhan yang seluruh sesinya telah terjadwal penuh", () => {
-    const fullyScheduledMath: TimetableSession[] = [
+    const fullSessions: TimetableSession[] = [
       {
-        id: "ses-1",
+        id: "ses-eng-1",
         workspaceId: "ws-1",
-        requirementId: "req-math",
+        requirementId: "req-eng",
         classId: "cls-7a",
-        subjectId: "sub-math",
-        teacherId: "tch-1",
-        roomId: "rm-1",
+        subjectId: "sub-eng",
+        teacherId: "tch-2",
+        roomId: null,
         dayOfWeek: "monday",
         startTime: "07:00",
-        endTime: "07:45",
-        durationMinutes: 45,
+        endTime: "08:30",
+        durationMinutes: 90,
       },
       {
-        id: "ses-2",
+        id: "ses-eng-2",
         workspaceId: "ws-1",
-        requirementId: "req-math",
+        requirementId: "req-eng",
         classId: "cls-7a",
-        subjectId: "sub-math",
-        teacherId: "tch-1",
-        roomId: "rm-1",
-        dayOfWeek: "tuesday",
-        startTime: "07:00",
-        endTime: "07:45",
-        durationMinutes: 45,
-      },
-      {
-        id: "ses-3",
-        workspaceId: "ws-1",
-        requirementId: "req-math",
-        classId: "cls-7a",
-        subjectId: "sub-math",
-        teacherId: "tch-1",
-        roomId: "rm-1",
+        subjectId: "sub-eng",
+        teacherId: "tch-2",
+        roomId: null,
         dayOfWeek: "wednesday",
         startTime: "07:00",
-        endTime: "07:45",
-        durationMinutes: 45,
-      },
-      // Sesi ekstra melebihi requirement (over-scheduled) tetap tidak membuat remainingCount negatif
-      {
-        id: "ses-4",
-        workspaceId: "ws-1",
-        requirementId: "req-math",
-        classId: "cls-7a",
-        subjectId: "sub-math",
-        teacherId: "tch-1",
-        roomId: "rm-1",
-        dayOfWeek: "thursday",
-        startTime: "07:00",
-        endTime: "07:45",
-        durationMinutes: 45,
+        endTime: "08:30",
+        durationMinutes: 90,
       },
     ]
 
-    const summary = calculateUnscheduledSessions([reqMath], fullyScheduledMath, "cls-7a")
+    const summary = calculateUnscheduledSessions([reqEnglish], fullSessions, "cls-7a")
+
+    expect(summary.totalRequiredSessions).toBe(2)
+    expect(summary.totalScheduledSessions).toBe(2)
     expect(summary.totalRemainingSessions).toBe(0)
-    expect(summary.items).toEqual([])
+    expect(summary.items).toHaveLength(0)
   })
 
   it("5. menjaga isolasi kelas: kebutuhan kelas lain tidak muncul pada kelas aktif", () => {
@@ -200,19 +193,23 @@ describe("FR-04.A & AC-08: calculateUnscheduledSessions", () => {
       "cls-7a"
     )
 
+    expect(summary.classId).toBe("cls-7a")
     expect(summary.totalRequiredSessions).toBe(3)
+    expect(summary.totalRemainingSessions).toBe(3)
     expect(summary.items).toHaveLength(3)
     expect(summary.items.every((item) => item.classId === "cls-7a")).toBe(true)
   })
 
   it("6. menyalin seluruh atribut default kebutuhan ke setiap UnscheduledSessionItem", () => {
     const summary = calculateUnscheduledSessions([reqMath], [], "cls-7a")
-    const item = summary.items[0]
 
-    expect(item.defaultTeacherId).toBe("tch-1")
-    expect(item.defaultRoomId).toBe("rm-1")
-    expect(item.durationMinutes).toBe(45)
-    expect(item.roomRequired).toBe(true)
-    expect(item.notes).toBe("Matematika Wajib")
+    const firstItem: UnscheduledSessionItem = summary.items[0]
+    expect(firstItem.classId).toBe("cls-7a")
+    expect(firstItem.subjectId).toBe("sub-math")
+    expect(firstItem.defaultTeacherId).toBe("tch-1")
+    expect(firstItem.defaultRoomId).toBe("rm-1")
+    expect(firstItem.durationMinutes).toBe(45)
+    expect(firstItem.roomRequired).toBe(true)
+    expect(firstItem.notes).toBe("Matematika Wajib")
   })
 })

@@ -1,5 +1,5 @@
 import { useDraggable } from "@dnd-kit/react"
-import { CalendarPlusIcon, GripVerticalIcon, MapPinIcon, UserIcon } from "lucide-react"
+import { GripVerticalIcon, MapPinIcon, UserIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { Subject, Teacher, Room } from "@/domain/types/entities"
 import type { UnscheduledSessionItem } from "@/domain/timetable/unscheduled-sessions"
@@ -20,8 +20,11 @@ export function UnscheduledSessionCard({
   room,
   onQuickPlace,
 }: UnscheduledSessionCardProps) {
+  const isFulfilled = item.remainingCount === 0
+
   const { ref, isDragging, handleRef } = useDraggable({
     id: item.virtualId,
+    disabled: isFulfilled,
     data: {
       type: "unscheduled-item",
       item,
@@ -38,6 +41,8 @@ export function UnscheduledSessionCard({
       className={`group relative flex flex-col gap-2 border bg-card p-2.5 transition-all ${
         isDragging
           ? "opacity-40 border-dashed border-primary"
+          : isFulfilled
+          ? "border-border/60 bg-muted/20 opacity-75"
           : "border-border hover:border-foreground/30 shadow-xs"
       }`}
     >
@@ -51,23 +56,36 @@ export function UnscheduledSessionCard({
           </span>
         </div>
 
-        <button
-          ref={handleRef}
-          type="button"
-          aria-label="Tarik kartu sesi"
-          className="cursor-grab text-muted-foreground hover:text-foreground active:cursor-grabbing p-0.5"
-        >
-          <GripVerticalIcon className="size-3.5" />
-        </button>
+        {!isFulfilled && (
+          <button
+            ref={handleRef}
+            type="button"
+            aria-label="Tarik kartu sesi"
+            className="cursor-grab text-muted-foreground hover:text-foreground active:cursor-grabbing p-0.5"
+          >
+            <GripVerticalIcon className="size-3.5" />
+          </button>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-        <span className="border border-border bg-muted/60 px-1.5 py-0.5 tabular-nums text-foreground font-medium">
-          {item.remainingCount} sesi tersisa
-        </span>
+        {isFulfilled ? (
+          <span className="border border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200 px-1.5 py-0.5 tabular-nums font-medium">
+            Selesai ({item.totalRequiredCount}/{item.totalRequiredCount} sesi)
+          </span>
+        ) : (
+          <span className="border border-border bg-muted/60 px-1.5 py-0.5 tabular-nums text-foreground font-medium">
+            {item.remainingCount} sesi tersisa
+          </span>
+        )}
         <span className="border border-border bg-muted/60 px-1.5 py-0.5 tabular-nums text-foreground">
           {item.durationMinutes} menit
         </span>
+        {!isFulfilled && (
+          <span className="border border-border bg-muted/60 px-1.5 py-0.5 tabular-nums text-muted-foreground">
+            Sesi {item.slotIndex + 1} dari {item.totalRequiredCount}
+          </span>
+        )}
       </div>
 
       {(teacher || room) && (
@@ -91,17 +109,28 @@ export function UnscheduledSessionCard({
       )}
 
       <div className="pt-1">
-        <Button
-          type="button"
-          variant="secondary"
-          size="xs"
-          className="w-full text-xs"
-          aria-label="Tempatkan ke Jadwal"
-          onClick={() => onQuickPlace(item)}
-        >
-          <CalendarPlusIcon data-icon="inline-start" className="size-3" />
-          <span>Tempatkan ke Jadwal</span>
-        </Button>
+        {isFulfilled ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            disabled
+            className="w-full text-xs text-muted-foreground"
+          >
+            Alokasi Terpenuhi
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="secondary"
+            size="xs"
+            className="w-full text-xs"
+            aria-label="Tempatkan ke Jadwal"
+            onClick={() => onQuickPlace(item)}
+          >
+            Tempatkan ke Jadwal
+          </Button>
+        )}
       </div>
     </div>
   )

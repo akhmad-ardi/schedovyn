@@ -11,7 +11,7 @@ describe("FR-05.6 & AC-08: evaluateCompletenessWarnings", () => {
   const classes: ClassGroup[] = [
     { id: "cls-7a", workspaceId: "ws-1", name: "VII-A", grade: "VII" },
     { id: "cls-7b", workspaceId: "ws-1", name: "VII-B", grade: "VII" },
-    { id: "cls-empty", workspaceId: "ws-1", name: "VIII-C", grade: "VIII" },
+    { id: "cls-7c", workspaceId: "ws-1", name: "VII-C", grade: "VII" }, // unconfigured
   ]
 
   const subjects: Subject[] = [
@@ -19,44 +19,32 @@ describe("FR-05.6 & AC-08: evaluateCompletenessWarnings", () => {
     { id: "sub-eng", workspaceId: "ws-1", name: "Bahasa Inggris", colorKey: "emerald" },
   ]
 
-  const requirements: TeachingRequirement[] = [
-    {
-      id: "req-math-7a",
-      workspaceId: "ws-1",
-      classId: "cls-7a",
-      subjectId: "sub-math",
-      defaultTeacherId: "tch-1",
-      defaultRoomId: "rm-1",
-      sessionsPerWeek: 4,
-      durationMinutes: 45,
-      roomRequired: true,
-    },
-    {
-      id: "req-eng-7a",
-      workspaceId: "ws-1",
-      classId: "cls-7a",
-      subjectId: "sub-eng",
-      defaultTeacherId: null,
-      defaultRoomId: null,
-      sessionsPerWeek: 2,
-      durationMinutes: 45,
-      roomRequired: false,
-    },
-    {
-      id: "req-math-7b",
-      workspaceId: "ws-1",
-      classId: "cls-7b",
-      subjectId: "sub-math",
-      defaultTeacherId: "tch-1",
-      defaultRoomId: null,
-      sessionsPerWeek: 2,
-      durationMinutes: 45,
-      roomRequired: false,
-    },
-  ]
-
   it("1. mendeteksi UNFULFILLED_REQUIREMENT saat alokasi sesi belum lengkap (AC-08)", () => {
-    // Math 7A butuh 4 sesi, baru dijadwalkan 2 sesi -> kurang 2 sesi
+    const requirements: TeachingRequirement[] = [
+      {
+        id: "req-math-7a",
+        workspaceId: "ws-1",
+        classId: "cls-7a",
+        subjectId: "sub-math",
+        defaultTeacherId: "tch-1",
+        defaultRoomId: null,
+        sessionsPerWeek: 4,
+        durationMinutes: 45,
+        roomRequired: false,
+      },
+      {
+        id: "req-eng-7a",
+        workspaceId: "ws-1",
+        classId: "cls-7a",
+        subjectId: "sub-eng",
+        defaultTeacherId: "tch-2",
+        defaultRoomId: null,
+        sessionsPerWeek: 2,
+        durationMinutes: 45,
+        roomRequired: false,
+      },
+    ]
+
     const sessions: TimetableSession[] = [
       {
         id: "ses-1",
@@ -65,10 +53,10 @@ describe("FR-05.6 & AC-08: evaluateCompletenessWarnings", () => {
         classId: "cls-7a",
         subjectId: "sub-math",
         teacherId: "tch-1",
-        roomId: "rm-1",
+        roomId: null,
         dayOfWeek: "monday",
-        startTime: "07:30",
-        endTime: "08:15",
+        startTime: "07:00",
+        endTime: "07:45",
         durationMinutes: 45,
       },
       {
@@ -78,10 +66,36 @@ describe("FR-05.6 & AC-08: evaluateCompletenessWarnings", () => {
         classId: "cls-7a",
         subjectId: "sub-math",
         teacherId: "tch-1",
-        roomId: "rm-1",
+        roomId: null,
         dayOfWeek: "tuesday",
-        startTime: "07:30",
-        endTime: "08:15",
+        startTime: "07:00",
+        endTime: "07:45",
+        durationMinutes: 45,
+      },
+      {
+        id: "ses-3",
+        workspaceId: "ws-1",
+        requirementId: "req-eng-7a",
+        classId: "cls-7a",
+        subjectId: "sub-eng",
+        teacherId: "tch-2",
+        roomId: null,
+        dayOfWeek: "wednesday",
+        startTime: "07:00",
+        endTime: "07:45",
+        durationMinutes: 45,
+      },
+      {
+        id: "ses-4",
+        workspaceId: "ws-1",
+        requirementId: "req-eng-7a",
+        classId: "cls-7a",
+        subjectId: "sub-eng",
+        teacherId: "tch-2",
+        roomId: null,
+        dayOfWeek: "thursday",
+        startTime: "07:00",
+        endTime: "07:45",
         durationMinutes: 45,
       },
     ]
@@ -99,7 +113,7 @@ describe("FR-05.6 & AC-08: evaluateCompletenessWarnings", () => {
     const mathWarn = unfulfilled.find((w) => w.requirementId === "req-math-7a")
     expect(mathWarn).toBeDefined()
     expect(mathWarn?.missingSessionCount).toBe(2)
-    expect(mathWarn?.description).toContain("kurang 2 sesi")
+    expect(mathWarn?.description).toContain("2 sesi belum terjadwal")
   })
 
   it("2. mendeteksi OVER_SCHEDULED_SESSION saat sesi terjadwal melebihi kebutuhan alokasi", () => {
@@ -113,8 +127,8 @@ describe("FR-05.6 & AC-08: evaluateCompletenessWarnings", () => {
         teacherId: "tch-1",
         roomId: null,
         dayOfWeek: "monday",
-        startTime: "07:30",
-        endTime: "08:15",
+        startTime: "07:00",
+        endTime: "07:45",
         durationMinutes: 45,
       },
       {
@@ -126,8 +140,8 @@ describe("FR-05.6 & AC-08: evaluateCompletenessWarnings", () => {
         teacherId: "tch-1",
         roomId: null,
         dayOfWeek: "tuesday",
-        startTime: "07:30",
-        endTime: "08:15",
+        startTime: "07:00",
+        endTime: "07:45",
         durationMinutes: 45,
       },
       {
@@ -139,9 +153,23 @@ describe("FR-05.6 & AC-08: evaluateCompletenessWarnings", () => {
         teacherId: "tch-1",
         roomId: null,
         dayOfWeek: "wednesday",
-        startTime: "07:30",
-        endTime: "08:15",
+        startTime: "07:00",
+        endTime: "07:45",
         durationMinutes: 45,
+      },
+    ]
+
+    const requirements: TeachingRequirement[] = [
+      {
+        id: "req-math-7b",
+        workspaceId: "ws-1",
+        classId: "cls-7b",
+        subjectId: "sub-math",
+        defaultTeacherId: "tch-1",
+        defaultRoomId: null,
+        sessionsPerWeek: 2,
+        durationMinutes: 45,
+        roomRequired: false,
       },
     ]
 
@@ -152,24 +180,39 @@ describe("FR-05.6 & AC-08: evaluateCompletenessWarnings", () => {
       sessions,
     })
 
-    const overWarn = warnings.find((w) => w.warningType === "OVER_SCHEDULED_SESSION" && w.requirementId === "req-math-7b")
-    expect(overWarn).toBeDefined()
-    expect(overWarn?.description).toContain("melebihi")
+    const overScheduled = warnings.filter((w) => w.warningType === "OVER_SCHEDULED_SESSION")
+    expect(overScheduled).toHaveLength(1)
+    expect(overScheduled[0].requirementId).toBe("req-math-7b")
+    expect(overScheduled[0].description).toContain("1 sesi lebih")
   })
 
   it("3. mendeteksi MISSING_TEACHER saat sesi terjadwal belum memiliki guru", () => {
+    const requirements: TeachingRequirement[] = [
+      {
+        id: "req-1",
+        workspaceId: "ws-1",
+        classId: "cls-7a",
+        subjectId: "sub-math",
+        defaultTeacherId: null,
+        defaultRoomId: null,
+        sessionsPerWeek: 1,
+        durationMinutes: 45,
+        roomRequired: false,
+      },
+    ]
+
     const sessions: TimetableSession[] = [
       {
-        id: "ses-no-tch",
+        id: "ses-1",
         workspaceId: "ws-1",
-        requirementId: "req-eng-7a",
+        requirementId: "req-1",
         classId: "cls-7a",
-        subjectId: "sub-eng",
-        teacherId: null, // Tanpa guru
+        subjectId: "sub-math",
+        teacherId: null,
         roomId: null,
         dayOfWeek: "monday",
-        startTime: "07:30",
-        endTime: "08:15",
+        startTime: "07:00",
+        endTime: "07:45",
         durationMinutes: 45,
       },
     ]
@@ -181,23 +224,38 @@ describe("FR-05.6 & AC-08: evaluateCompletenessWarnings", () => {
       sessions,
     })
 
-    const missingTch = warnings.find((w) => w.warningType === "MISSING_TEACHER" && w.sessionId === "ses-no-tch")
-    expect(missingTch).toBeDefined()
+    const missingTeacher = warnings.filter((w) => w.warningType === "MISSING_TEACHER")
+    expect(missingTeacher).toHaveLength(1)
+    expect(missingTeacher[0].sessionId).toBe("ses-1")
   })
 
   it("4. mendeteksi MISSING_REQUIRED_ROOM saat kebutuhan mewajibkan ruangan namun sesi belum ditentukan ruangannya", () => {
+    const requirements: TeachingRequirement[] = [
+      {
+        id: "req-1",
+        workspaceId: "ws-1",
+        classId: "cls-7a",
+        subjectId: "sub-math",
+        defaultTeacherId: "tch-1",
+        defaultRoomId: null,
+        sessionsPerWeek: 1,
+        durationMinutes: 45,
+        roomRequired: true,
+      },
+    ]
+
     const sessions: TimetableSession[] = [
       {
-        id: "ses-no-rm",
+        id: "ses-1",
         workspaceId: "ws-1",
-        requirementId: "req-math-7a", // roomRequired: true
+        requirementId: "req-1",
         classId: "cls-7a",
         subjectId: "sub-math",
         teacherId: "tch-1",
-        roomId: null, // Belum ditentukan ruangan
+        roomId: null,
         dayOfWeek: "monday",
-        startTime: "07:30",
-        endTime: "08:15",
+        startTime: "07:00",
+        endTime: "07:45",
         durationMinutes: 45,
       },
     ]
@@ -209,19 +267,24 @@ describe("FR-05.6 & AC-08: evaluateCompletenessWarnings", () => {
       sessions,
     })
 
-    const missingRm = warnings.find((w) => w.warningType === "MISSING_REQUIRED_ROOM" && w.sessionId === "ses-no-rm")
-    expect(missingRm).toBeDefined()
+    const missingRoom = warnings.filter((w) => w.warningType === "MISSING_REQUIRED_ROOM")
+    expect(missingRoom).toHaveLength(1)
+    expect(missingRoom[0].sessionId).toBe("ses-1")
   })
 
   it("5. mendeteksi UNCONFIGURED_CLASS pada kelas yang belum memiliki kebutuhan pembelajaran sama sekali", () => {
     const warnings = evaluateCompletenessWarnings({
       classes,
       subjects,
-      requirements,
+      requirements: [],
       sessions: [],
     })
 
-    const unconfigured = warnings.find((w) => w.warningType === "UNCONFIGURED_CLASS" && w.classId === "cls-empty")
-    expect(unconfigured).toBeDefined()
+    const unconfigured = warnings.filter((w) => w.warningType === "UNCONFIGURED_CLASS")
+    expect(unconfigured).toHaveLength(3)
+    const classIds = unconfigured.map((u) => u.classId)
+    expect(classIds).toContain("cls-7a")
+    expect(classIds).toContain("cls-7b")
+    expect(classIds).toContain("cls-7c")
   })
 })

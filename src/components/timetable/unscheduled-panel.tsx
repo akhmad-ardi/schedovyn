@@ -1,5 +1,5 @@
 import * as React from "react"
-import { SearchIcon } from "lucide-react"
+import { SearchIcon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -19,9 +19,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { UnscheduledEmptyState } from "@/components/timetable/unscheduled-empty-state"
+import { UnscheduledProgressHeader } from "@/components/timetable/unscheduled-progress-header"
 import { UnscheduledSessionCard } from "@/components/timetable/unscheduled-session-card"
 import {
-  calculateUnscheduledSessions,
+  filterAndSortUnscheduledItems,
   type UnscheduledSessionItem,
 } from "@/domain/timetable/unscheduled-sessions"
 import {
@@ -33,9 +35,6 @@ import {
 import { useWorkspaceStore } from "@/store/use-workspace-store"
 
 export function UnscheduledPanel() {
-  const workspace = useWorkspaceStore((state) => state.workspace)
-  const requirements = useWorkspaceStore((state) => state.requirements)
-  const sessions = useWorkspaceStore((state) => state.sessions)
   const subjects = useWorkspaceStore((state) => state.subjects)
   const teachers = useWorkspaceStore((state) => state.teachers)
   const rooms = useWorkspaceStore((state) => state.rooms)
@@ -43,17 +42,25 @@ export function UnscheduledPanel() {
   const placeUnscheduledSession = useWorkspaceStore(
     (state) => state.placeUnscheduledSession
   )
+  const getActiveClassUnscheduledSummary = useWorkspaceStore(
+    (state) => state.getActiveClassUnscheduledSummary
+  )
 
   const [searchQuery, setSearchQuery] = React.useState("")
+  const [statusFilter, setStatusFilter] = React.useState<
+    "unfulfilled_only" | "all"
+  >("unfulfilled_only")
+  const [sortBy] = React.useState<
+    "subject_name_asc" | "remaining_desc" | "duration_desc"
+  >("subject_name_asc")
+
   const [selectedItemForDialog, setSelectedItemForDialog] =
     React.useState<UnscheduledSessionItem | null>(null)
   const [dialogDay, setDialogDay] = React.useState<DayOfWeek>("monday")
-  const [dialogStartTime, setDialogStartTime] = React.useState<TimeString>("07:30")
+  const [dialogStartTime, setDialogStartTime] =
+    React.useState<TimeString>("07:30")
 
-  const activeClassId = workspace?.activeClassId ?? ""
-  const summary = React.useMemo(() => {
-    return calculateUnscheduledSessions(requirements, sessions, activeClassId)
-  }, [requirements, sessions, activeClassId])
+  const summary = getActiveClassUnscheduledSummary()
 
   const activeDays = React.useMemo(() => {
     return ORDERED_DAYS_OF_WEEK.filter((d) =>
@@ -61,15 +68,40 @@ export function UnscheduledPanel() {
     )
   }, [dayConfigs])
 
-  // Filter items by subject name
+  const subjectNameMap = React.useMemo(() => {
+    const map = new Map<string, string>()
+    for (const s of subjects) {
+      map.set(s.id, s.name)
+    }
+    return map
+  }, [subjects])
+
+  // Bangun daftar kartu unik per kebutuhan mata pelajaran
+  const baseItems = React.useMemo(() => {
+    return summary.bySubject.map((sub) => ({
+      virtualId: `${sub.requirementId}::slot-0`,
+      requirementId: sub.requirementId,
+      classId: sub.classId,
+      subjectId: sub.subjectId,
+      defaultTeacherId: sub.defaultTeacherId,
+      defaultRoomId: sub.defaultRoomId,
+      durationMinutes: sub.durationMinutes,
+      roomRequired: sub.roomRequired,
+      notes: sub.notes,
+      slotIndex: 0,
+      remainingCount: sub.remainingSessions,
+      totalRequiredCount: sub.requiredSessions,
+    }))
+  }, [summary.bySubject])
+
+  // Filter & sort
   const filteredItems = React.useMemo(() => {
-    if (!searchQuery.trim()) return summary.items
-    const query = searchQuery.toLowerCase().trim()
-    return summary.items.filter((item) => {
-      const subject = subjects.find((s) => s.id === item.subjectId)
-      return subject?.name.toLowerCase().includes(query)
+    return filterAndSortUnscheduledItems(baseItems, subjectNameMap, {
+      searchQuery,
+      statusFilter,
+      sortBy,
     })
-  }, [summary.items, subjects, searchQuery])
+  }, [baseItems, subjectNameMap, searchQuery, statusFilter, sortBy])
 
   const handleOpenDialog = (item: UnscheduledSessionItem) => {
     setSelectedItemForDialog(item)
@@ -95,22 +127,59 @@ export function UnscheduledPanel() {
     ? subjects.find((s) => s.id === selectedItemForDialog.subjectId)
     : null
 
+  // Kondisi 1: Kelas belum memiliki kebutuhan pembelajaran
+  if (summary.totalRequiredSessions === 0) {
+    return (
+      <section
+        role="region"
+        aria-label="Sesi Belum Terjadwal"
+        className="flex w-72 shrink-0 flex-col border-r border-border bg-card"
+      >
+        <UnscheduledProgressHeader
+          totalRequired={0}
+          totalScheduled={0}
+          totalRemaining={0}
+          percentage={100}
+        />
+        <UnscheduledEmptyState type="no_requirements" />
+      </section>
+    )
+  }
+
+  // Kondisi 2: Seluruh sesi telah terjadwal 100%
+  if (summary.isFullyScheduled) {
+    return (
+      <section
+        role="region"
+        aria-label="Sesi Belum Terjadwal"
+        className="flex w-72 shrink-0 flex-col border-r border-border bg-card"
+      >
+        <UnscheduledProgressHeader
+          totalRequired={summary.totalRequiredSessions}
+          totalScheduled={summary.totalScheduledSessions}
+          totalRemaining={0}
+          percentage={100}
+        />
+        <UnscheduledEmptyState type="completed" />
+      </section>
+    )
+  }
+
   return (
     <section
       role="region"
       aria-label="Sesi Belum Terjadwal"
       className="flex w-72 shrink-0 flex-col border-r border-border bg-card"
     >
-      <div className="flex flex-col gap-2.5 border-b border-border p-3">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="font-heading text-xs font-semibold tracking-tight text-foreground">
-            Sesi Belum Terjadwal
-          </h2>
-          <span className="border border-border bg-muted px-1.5 py-0.5 text-[11px] tabular-nums font-medium text-foreground">
-            {summary.totalRemainingSessions} sesi
-          </span>
-        </div>
+      <UnscheduledProgressHeader
+        totalRequired={summary.totalRequiredSessions}
+        totalScheduled={summary.totalScheduledSessions}
+        totalRemaining={summary.totalRemainingSessions}
+        percentage={summary.overallCompletionPercentage}
+      />
 
+      {/* Kontrol Pencarian & Filter */}
+      <div className="flex flex-col gap-2 border-b border-border p-3">
         <div className="relative">
           <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -118,18 +187,51 @@ export function UnscheduledPanel() {
             placeholder="Cari mata pelajaran..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-8 pl-8 text-xs"
+            className="h-8 pl-8 pr-7 text-xs"
           />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              aria-label="Hapus kata kunci pencarian"
+            >
+              <XIcon className="size-3.5" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <Button
+            type="button"
+            variant={statusFilter === "unfulfilled_only" ? "default" : "outline"}
+            size="xs"
+            onClick={() => setStatusFilter("unfulfilled_only")}
+          >
+            Belum Selesai
+          </Button>
+          <Button
+            type="button"
+            variant={statusFilter === "all" ? "default" : "outline"}
+            size="xs"
+            onClick={() => setStatusFilter("all")}
+          >
+            Semua
+          </Button>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2.5">
+      {/* Daftar Kartu Sesi */}
+      <div className="flex flex-1 flex-col gap-2.5 overflow-y-auto p-3">
         {filteredItems.length === 0 ? (
-          <div className="py-6 text-center text-xs text-muted-foreground">
-            {searchQuery.trim()
-              ? "Tidak ada mata pelajaran yang cocok."
-              : "Semua sesi telah terjadwal ke dalam grid!"}
-          </div>
+          <UnscheduledEmptyState
+            type="no_search_results"
+            searchQuery={searchQuery}
+            onResetSearch={() => {
+              setSearchQuery("")
+              setStatusFilter("all")
+            }}
+          />
         ) : (
           filteredItems.map((item) => {
             const subject = subjects.find((s) => s.id === item.subjectId)

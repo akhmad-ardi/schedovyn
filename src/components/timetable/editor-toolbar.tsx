@@ -11,9 +11,28 @@ export function EditorToolbar() {
   const redo = useWorkspaceStore((state) => state.redo)
   const pastCount = useWorkspaceStore((state) => state.historyPast?.length ?? 0)
   const futureCount = useWorkspaceStore((state) => state.historyFuture?.length ?? 0)
+  const getUndoActionLabel = useWorkspaceStore(
+    (state) => state.getUndoActionLabel
+  )
+  const getRedoActionLabel = useWorkspaceStore(
+    (state) => state.getRedoActionLabel
+  )
 
   const canUndo = pastCount > 0
   const canRedo = futureCount > 0
+
+  const undoActionLabel = getUndoActionLabel()
+  const redoActionLabel = getRedoActionLabel()
+
+  const undoTitle =
+    canUndo && undoActionLabel
+      ? `Batalkan: ${undoActionLabel} (Ctrl+Z)`
+      : "Tidak ada perubahan yang dapat dibatalkan"
+
+  const redoTitle =
+    canRedo && redoActionLabel
+      ? `Ulangi: ${redoActionLabel} (Ctrl+Y)`
+      : "Tidak ada perubahan yang dapat diulangi"
 
   return (
     <>
@@ -29,6 +48,7 @@ export function EditorToolbar() {
             size="xs"
             disabled={!canUndo}
             aria-label="Batal Perubahan"
+            title={undoTitle}
             onClick={() => {
               void undo()
             }}
@@ -43,6 +63,7 @@ export function EditorToolbar() {
             size="xs"
             disabled={!canRedo}
             aria-label="Ulangi Perubahan"
+            title={redoTitle}
             onClick={() => {
               void redo()
             }}

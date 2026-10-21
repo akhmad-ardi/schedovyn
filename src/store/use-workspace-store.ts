@@ -8,21 +8,33 @@ import type {
   WorkspaceValidationReport,
 } from "@/domain/types/validation"
 import { evaluateWorkspaceValidation } from "@/domain/validation/workspace-validator"
+import {
+  calculateUnscheduledSessions,
+  type ClassUnscheduledSummary,
+} from "@/domain/timetable/unscheduled-sessions"
 
-import type {
-  BreakInterval,
-  ClassGroup,
-  DayOfWeek,
-  DayScheduleConfig,
-  Room,
-  SnapIntervalMinutes,
-  Subject,
-  Teacher,
-  TeachingRequirement,
-  TimeString,
-  TimetableSession,
-  Workspace,
+import {
+  DAY_OF_WEEK_LABELS,
+  type BreakInterval,
+  type ClassGroup,
+  type DayOfWeek,
+  type DayScheduleConfig,
+  type Room,
+  type SnapIntervalMinutes,
+  type Subject,
+  type Teacher,
+  type TeachingRequirement,
+  type TimeString,
+  type TimetableSession,
+  type Workspace,
 } from "@/domain/types/entities"
+import {
+  type ScheduleHistorySnapshot,
+  formatScheduleActionLabel,
+  performHistoryRedo,
+  performHistoryUndo,
+  recordHistoryStep,
+} from "@/domain/history/schedule-history"
 import {
   validateClassGroupInput,
   validateRoomInput,
@@ -47,11 +59,7 @@ const LOCAL_SAVE_ERROR_MESSAGE =
   "Gagal menyimpan ke penyimpanan lokal browser. Periksa ruang penyimpanan browser Anda lalu klik Coba Simpan Ulang."
 
 
-export interface ScheduleHistorySnapshot {
-  actionLabel: string
-  timestamp: number
-  sessions: TimetableSession[]
-}
+export type { ScheduleHistorySnapshot }
 
 export interface MasterDataMutationOutcome<T = void> {
   ok: boolean
@@ -86,6 +94,14 @@ export interface WorkspaceStoreState {
   getActiveClassValidationSummary: () => ScopeValidationSummary | null
   getSessionConflicts: (sessionId: string) => ScheduleConflict[]
   getSessionWarnings: (sessionId: string) => CompletenessWarning[]
+  getActiveClassUnscheduledSummary: () => ClassUnscheduledSummary
+  getWorkspaceUnscheduledSummary: () => {
+    totalRequiredSessions: number
+    totalScheduledSessions: number
+    totalRemainingSessions: number
+    overallCompletionPercentage: number
+    byClassId: Record<string, ClassUnscheduledSummary>
+  }
 
   bootWorkspace: () => Promise<void>
   updateWorkspaceIdentity: (patch: {
@@ -165,7 +181,7 @@ export interface WorkspaceStoreState {
   ) => Promise<MasterDataMutationOutcome<TeachingRequirement>>
   updateTeachingRequirement: (
     requirementId: string,
-    input: TeachingRequirementInput
+    input: Partial<TeachingRequirementInput>
   ) => Promise<MasterDataMutationOutcome<TeachingRequirement>>
   deleteTeachingRequirement: (requirementId: string) => Promise<boolean>
 
@@ -203,6 +219,8 @@ export interface WorkspaceStoreState {
   redo: () => Promise<boolean>
   canUndo: () => boolean
   canRedo: () => boolean
+  getUndoActionLabel: () => string | null
+  getRedoActionLabel: () => string | null
 }
 
 export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
@@ -780,6 +798,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
       }
 
       set({ saveStatus: "saving", saveErrorMessage: null })
+
       try {
         const updatedWorkspace = await workspaceRepo.saveTeacher(
           workspace,
@@ -1084,8 +1103,34 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         return { ok: false }
       }
 
+      const mergedInput: TeachingRequirementInput = {
+        classId: input.classId ?? existing.classId,
+        subjectId: input.subjectId ?? existing.subjectId,
+        defaultTeacherId:
+          input.defaultTeacherId !== undefined
+            ? input.defaultTeacherId
+            : existing.defaultTeacherId,
+        defaultRoomId:
+          input.defaultRoomId !== undefined
+            ? input.defaultRoomId
+            : existing.defaultRoomId,
+        sessionsPerWeek:
+          input.sessionsPerWeek !== undefined
+            ? input.sessionsPerWeek
+            : existing.sessionsPerWeek,
+        durationMinutes:
+          input.durationMinutes !== undefined
+            ? input.durationMinutes
+            : existing.durationMinutes,
+        roomRequired:
+          input.roomRequired !== undefined
+            ? input.roomRequired
+            : existing.roomRequired,
+        notes: input.notes !== undefined ? input.notes : existing.notes,
+      }
+
       const validation = validateTeachingRequirementInput(
-        input,
+        mergedInput,
         {
           classes,
           subjects,
@@ -1101,14 +1146,8 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
 
       const updatedReq: TeachingRequirement = {
         ...existing,
-        classId: input.classId,
-        subjectId: input.subjectId,
-        defaultTeacherId: input.defaultTeacherId,
-        defaultRoomId: input.defaultRoomId,
-        sessionsPerWeek: input.sessionsPerWeek,
-        durationMinutes: input.durationMinutes,
-        roomRequired: input.roomRequired,
-        notes: input.notes?.trim() ? input.notes.trim() : undefined,
+        ...mergedInput,
+        notes: mergedInput.notes?.trim() ? mergedInput.notes.trim() : undefined,
       }
 
       set({ saveStatus: "saving", saveErrorMessage: null })
@@ -1224,7 +1263,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
     },
 
     placeUnscheduledSession: async ({ requirementId, dayOfWeek, startTime }) => {
-      const { workspace, requirements, sessions, historyPast } = get()
+      const { workspace, requirements, subjects, sessions, historyPast, historyFuture } = get()
       if (!workspace) return false
       const req = requirements.find((r) => r.id === requirementId)
       if (!req) return false
@@ -1232,6 +1271,16 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
       const startM = timeToMinutes(startTime)
       const endM = startM + req.durationMinutes
       const endTime = minutesToTime(endM)
+
+      const subject = subjects.find((s) => s.id === req.subjectId)
+      const dayLabel = DAY_OF_WEEK_LABELS[dayOfWeek]
+      const timeRange = `${startTime} - ${endTime}`
+      const actionLabel = formatScheduleActionLabel({
+        type: "place",
+        subjectName: subject?.name,
+        dayLabel,
+        timeRange,
+      })
 
       const newSession: TimetableSession = {
         id: crypto.randomUUID(),
@@ -1247,16 +1296,16 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         durationMinutes: req.durationMinutes,
       }
 
-      const snapshot: ScheduleHistorySnapshot = {
-        actionLabel: "Aksi Jadwal",
-        timestamp: Date.now(),
-        sessions: structuredClone(sessions),
-      }
+      const nextHistory = recordHistoryStep(
+        { past: historyPast, future: historyFuture },
+        sessions,
+        actionLabel
+      )
 
       const nextSessions = [...sessions, newSession]
       set({
-        historyPast: [...historyPast.slice(-49), snapshot],
-        historyFuture: [],
+        historyPast: nextHistory.past,
+        historyFuture: nextHistory.future,
         sessions: nextSessions,
         selectedSessionId: newSession.id,
         validationReport: runValidation({ sessions: nextSessions }),
@@ -1286,7 +1335,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
     },
 
     moveSession: async ({ sessionId, dayOfWeek, startTime }) => {
-      const { workspace, sessions, historyPast } = get()
+      const { workspace, subjects, sessions, historyPast, historyFuture } = get()
       if (!workspace) return false
       const existing = sessions.find((s) => s.id === sessionId)
       if (!existing) return false
@@ -1295,6 +1344,16 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
       const endM = startM + existing.durationMinutes
       const endTime = minutesToTime(endM)
 
+      const subject = subjects.find((s) => s.id === existing.subjectId)
+      const dayLabel = DAY_OF_WEEK_LABELS[dayOfWeek]
+      const timeRange = `${startTime} - ${endTime}`
+      const actionLabel = formatScheduleActionLabel({
+        type: "move",
+        subjectName: subject?.name,
+        dayLabel,
+        timeRange,
+      })
+
       const updatedSession: TimetableSession = {
         ...existing,
         dayOfWeek,
@@ -1302,18 +1361,18 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         endTime,
       }
 
-      const snapshot: ScheduleHistorySnapshot = {
-        actionLabel: "Aksi Jadwal",
-        timestamp: Date.now(),
-        sessions: structuredClone(sessions),
-      }
+      const nextHistory = recordHistoryStep(
+        { past: historyPast, future: historyFuture },
+        sessions,
+        actionLabel
+      )
 
       const nextSessions = sessions.map((s) =>
         s.id === sessionId ? updatedSession : s
       )
       set({
-        historyPast: [...historyPast.slice(-49), snapshot],
-        historyFuture: [],
+        historyPast: nextHistory.past,
+        historyFuture: nextHistory.future,
         sessions: nextSessions,
         validationReport: runValidation({ sessions: nextSessions }),
         saveStatus: "saving",
@@ -1342,7 +1401,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
     },
 
     updateSessionDetails: async ({ sessionId, patch }) => {
-      const { workspace, sessions, historyPast } = get()
+      const { workspace, subjects, teachers, rooms, sessions, historyPast, historyFuture } = get()
       if (!workspace) return false
       const existing = sessions.find((s) => s.id === sessionId)
       if (!existing) return false
@@ -1352,6 +1411,39 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
       const startM = timeToMinutes(startTime)
       const endTime = minutesToTime(startM + durationMinutes)
 
+      const subject = subjects.find((s) => s.id === existing.subjectId)
+      const isTimeChanged =
+        (patch.startTime !== undefined && patch.startTime !== existing.startTime) ||
+        (patch.durationMinutes !== undefined && patch.durationMinutes !== existing.durationMinutes) ||
+        (patch.dayOfWeek !== undefined && patch.dayOfWeek !== existing.dayOfWeek)
+
+      let actionLabel: string
+      if (isTimeChanged) {
+        const dayOfWeek = patch.dayOfWeek ?? existing.dayOfWeek
+        const dayLabel = DAY_OF_WEEK_LABELS[dayOfWeek]
+        const timeRange = `${startTime} - ${endTime}`
+        actionLabel = formatScheduleActionLabel({
+          type: "update_time",
+          subjectName: subject?.name,
+          dayLabel,
+          timeRange,
+        })
+      } else {
+        let extraDetail: string | undefined
+        if (patch.teacherId !== undefined && patch.teacherId !== existing.teacherId) {
+          const teacher = teachers.find((t) => t.id === patch.teacherId)
+          extraDetail = teacher?.name
+        } else if (patch.roomId !== undefined && patch.roomId !== existing.roomId) {
+          const room = rooms.find((r) => r.id === patch.roomId)
+          extraDetail = room?.name
+        }
+        actionLabel = formatScheduleActionLabel({
+          type: "update_details",
+          subjectName: subject?.name,
+          extraDetail,
+        })
+      }
+
       const updatedSession: TimetableSession = {
         ...existing,
         ...patch,
@@ -1360,18 +1452,18 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         endTime,
       }
 
-      const snapshot: ScheduleHistorySnapshot = {
-        actionLabel: "Ubah detail sesi",
-        timestamp: Date.now(),
-        sessions: structuredClone(sessions),
-      }
+      const nextHistory = recordHistoryStep(
+        { past: historyPast, future: historyFuture },
+        sessions,
+        actionLabel
+      )
 
       const nextSessions = sessions.map((s) =>
         s.id === sessionId ? updatedSession : s
       )
       set({
-        historyPast: [...historyPast.slice(-49), snapshot],
-        historyFuture: [],
+        historyPast: nextHistory.past,
+        historyFuture: nextHistory.future,
         sessions: nextSessions,
         validationReport: runValidation({ sessions: nextSessions }),
         saveStatus: "saving",
@@ -1400,21 +1492,27 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
     },
 
     removeSession: async (sessionId) => {
-      const { workspace, sessions, historyPast, selectedSessionId } = get()
+      const { workspace, subjects, sessions, historyPast, historyFuture, selectedSessionId } = get()
       if (!workspace) return false
       const existing = sessions.find((s) => s.id === sessionId)
       if (!existing) return false
 
-      const snapshot: ScheduleHistorySnapshot = {
-        actionLabel: "Lepas sesi dari grid",
-        timestamp: Date.now(),
-        sessions: structuredClone(sessions),
-      }
+      const subject = subjects.find((s) => s.id === existing.subjectId)
+      const actionLabel = formatScheduleActionLabel({
+        type: "remove",
+        subjectName: subject?.name,
+      })
+
+      const nextHistory = recordHistoryStep(
+        { past: historyPast, future: historyFuture },
+        sessions,
+        actionLabel
+      )
 
       const nextSessions = sessions.filter((s) => s.id !== sessionId)
       set({
-        historyPast: [...historyPast.slice(-49), snapshot],
-        historyFuture: [],
+        historyPast: nextHistory.past,
+        historyFuture: nextHistory.future,
         sessions: nextSessions,
         selectedSessionId:
           selectedSessionId === sessionId ? null : selectedSessionId,
@@ -1466,29 +1564,86 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
       return validationReport.warningsBySessionId[sessionId] ?? []
     },
 
+    getActiveClassUnscheduledSummary: () => {
+      const { requirements, sessions, workspace } = get()
+      const activeClassId = workspace?.activeClassId ?? ""
+      return calculateUnscheduledSessions(requirements, sessions, activeClassId)
+    },
+
+    getWorkspaceUnscheduledSummary: () => {
+      const { classes, requirements, sessions } = get()
+      const byClassId: Record<string, ClassUnscheduledSummary> = {}
+      let totalRequiredSessions = 0
+      let totalScheduledSessions = 0
+      let totalRemainingSessions = 0
+
+      for (const cls of classes) {
+        const summary = calculateUnscheduledSessions(
+          requirements,
+          sessions,
+          cls.id
+        )
+        byClassId[cls.id] = summary
+        totalRequiredSessions += summary.totalRequiredSessions
+        totalScheduledSessions += summary.totalScheduledSessions
+        totalRemainingSessions += summary.totalRemainingSessions
+      }
+
+      const overallCompletionPercentage =
+        totalRequiredSessions > 0
+          ? Math.min(
+              100,
+              Math.round((totalScheduledSessions / totalRequiredSessions) * 100)
+            )
+          : 100
+
+      return {
+        totalRequiredSessions,
+        totalScheduledSessions,
+        totalRemainingSessions,
+        overallCompletionPercentage,
+        byClassId,
+      }
+    },
+
     canUndo: () => get().historyPast.length > 0,
     canRedo: () => get().historyFuture.length > 0,
 
+    getUndoActionLabel: () => {
+      const { historyPast } = get()
+      return historyPast.length > 0
+        ? historyPast[historyPast.length - 1].actionLabel
+        : null
+    },
+
+    getRedoActionLabel: () => {
+      const { historyFuture } = get()
+      return historyFuture.length > 0 ? historyFuture[0].actionLabel : null
+    },
+
     undo: async () => {
-      const { historyPast, historyFuture, sessions, workspace } = get()
+      const { historyPast, historyFuture, sessions, workspace, selectedSessionId } = get()
       if (historyPast.length === 0 || !workspace) return false
 
-      const previousSnapshot = historyPast[historyPast.length - 1]
-      const currentSnapshot: ScheduleHistorySnapshot = {
-        actionLabel: "Current State",
-        timestamp: Date.now(),
-        sessions: structuredClone(sessions),
-      }
+      const undoResult = performHistoryUndo(
+        { past: historyPast, future: historyFuture },
+        sessions
+      )
+      if (!undoResult) return false
 
-      const newHistoryPast = historyPast.slice(0, -1)
-      const newHistoryFuture = [currentSnapshot, ...historyFuture]
-      const targetSessions = structuredClone(previousSnapshot.sessions)
+      const { nextHistory, restoredSessions } = undoResult
+      const nextSelectedSessionId = restoredSessions.some(
+        (s) => s.id === selectedSessionId
+      )
+        ? selectedSessionId
+        : null
 
       set({
-        historyPast: newHistoryPast,
-        historyFuture: newHistoryFuture,
-        sessions: targetSessions,
-        validationReport: runValidation({ sessions: targetSessions }),
+        historyPast: nextHistory.past,
+        historyFuture: nextHistory.future,
+        sessions: restoredSessions,
+        selectedSessionId: nextSelectedSessionId,
+        validationReport: runValidation({ sessions: restoredSessions }),
         saveStatus: "saving",
         saveErrorMessage: null,
       })
@@ -1496,7 +1651,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
       try {
         const savedWorkspace = await workspaceRepo.batchSaveTimetableSessions(
           workspace,
-          targetSessions
+          restoredSessions
         )
         set({
           workspace: savedWorkspace,
@@ -1515,25 +1670,28 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
     },
 
     redo: async () => {
-      const { historyPast, historyFuture, sessions, workspace } = get()
+      const { historyPast, historyFuture, sessions, workspace, selectedSessionId } = get()
       if (historyFuture.length === 0 || !workspace) return false
 
-      const nextSnapshot = historyFuture[0]
-      const currentSnapshot: ScheduleHistorySnapshot = {
-        actionLabel: "Current State",
-        timestamp: Date.now(),
-        sessions: structuredClone(sessions),
-      }
+      const redoResult = performHistoryRedo(
+        { past: historyPast, future: historyFuture },
+        sessions
+      )
+      if (!redoResult) return false
 
-      const newHistoryFuture = historyFuture.slice(1)
-      const newHistoryPast = [...historyPast, currentSnapshot]
-      const targetSessions = structuredClone(nextSnapshot.sessions)
+      const { nextHistory, restoredSessions } = redoResult
+      const nextSelectedSessionId = restoredSessions.some(
+        (s) => s.id === selectedSessionId
+      )
+        ? selectedSessionId
+        : null
 
       set({
-        historyPast: newHistoryPast,
-        historyFuture: newHistoryFuture,
-        sessions: targetSessions,
-        validationReport: runValidation({ sessions: targetSessions }),
+        historyPast: nextHistory.past,
+        historyFuture: nextHistory.future,
+        sessions: restoredSessions,
+        selectedSessionId: nextSelectedSessionId,
+        validationReport: runValidation({ sessions: restoredSessions }),
         saveStatus: "saving",
         saveErrorMessage: null,
       })
@@ -1541,7 +1699,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
       try {
         const savedWorkspace = await workspaceRepo.batchSaveTimetableSessions(
           workspace,
-          targetSessions
+          restoredSessions
         )
         set({
           workspace: savedWorkspace,
