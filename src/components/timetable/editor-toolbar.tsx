@@ -1,7 +1,13 @@
 import { useState } from "react"
-import { FileDownIcon, Redo2Icon, Undo2Icon } from "lucide-react"
+import {
+  FileDownIcon,
+  FileSpreadsheetIcon,
+  Redo2Icon,
+  Undo2Icon,
+} from "lucide-react"
 import { ConflictListPanel } from "@/components/conflicts/conflict-list-panel"
 import { ConflictStatusBadge } from "@/components/conflicts/conflict-status-badge"
+import { ExportExcelDialog } from "@/components/export/export-excel-dialog"
 import { ExportPdfDialog } from "@/components/export/export-pdf-dialog"
 import { Button } from "@/components/ui/button"
 import { useWorkspaceStore } from "@/store/use-workspace-store"
@@ -9,6 +15,7 @@ import { useWorkspaceStore } from "@/store/use-workspace-store"
 export function EditorToolbar() {
   const [conflictListOpen, setConflictListOpen] = useState(false)
   const [exportPdfOpen, setExportPdfOpen] = useState(false)
+  const [exportExcelOpen, setExportExcelOpen] = useState(false)
 
   const undo = useWorkspaceStore((state) => state.undo)
   const redo = useWorkspaceStore((state) => state.redo)
@@ -90,6 +97,21 @@ export function EditorToolbar() {
             <FileDownIcon data-icon="inline-start" className="size-3.5" />
             <span>Ekspor PDF</span>
           </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            aria-label="Ekspor Excel"
+            title="Ekspor Jadwal ke Berkas Spreadsheet Excel (.xlsx)"
+            onClick={() => setExportExcelOpen(true)}
+          >
+            <FileSpreadsheetIcon
+              data-icon="inline-start"
+              className="size-3.5"
+            />
+            <span>Ekspor Excel</span>
+          </Button>
         </div>
 
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
@@ -111,6 +133,11 @@ export function EditorToolbar() {
       <ExportPdfDialog
         open={exportPdfOpen}
         onOpenChange={setExportPdfOpen}
+      />
+
+      <ExportExcelDialog
+        open={exportExcelOpen}
+        onOpenChange={setExportExcelOpen}
       />
     </>
   )
