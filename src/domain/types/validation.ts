@@ -1,4 +1,4 @@
-import type { DayOfWeek, TimeString } from "@/domain/types/entities"
+import type { ClassGroup, DayOfWeek, TimeString } from "@/domain/types/entities"
 
 /** Jenis bentrokan waktu nyata (Tingkat Keparahan: ERROR) */
 export type ConflictType =
@@ -92,6 +92,11 @@ export interface ScopeValidationSummary {
   completenessWarningsCount: number
   conflicts: ScheduleConflict[]
   warnings: CompletenessWarning[]
+}
+
+export interface ClassValidationMatrixItem {
+  classGroup: ClassGroup
+  summary: ScopeValidationSummary
 }
 
 export interface WorkspaceValidationReport {

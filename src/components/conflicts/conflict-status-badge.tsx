@@ -4,22 +4,37 @@ import {
   CheckCircle2Icon,
   InfoIcon,
 } from "lucide-react"
+import { cn } from "cn"
+import { VALIDATION_STATUS_LABELS } from "@/domain/types/validation"
 import { useWorkspaceStore } from "@/store/use-workspace-store"
 
 export interface ConflictStatusBadgeProps {
+  scope?: "workspace" | "active-class" | "dual"
   onOpenConflictList?: () => void
+  className?: string
 }
 
 export function ConflictStatusBadge({
+  scope = "workspace",
   onOpenConflictList,
+  className,
 }: ConflictStatusBadgeProps) {
-  const validationReport = useWorkspaceStore((state) => state.validationReport)
-  const workspaceSummary = validationReport?.workspaceSummary
+  const getWorkspaceSummary = useWorkspaceStore(
+    (state) => state.getWorkspaceValidationSummary
+  )
+  const getActiveClassSummary = useWorkspaceStore(
+    (state) => state.getActiveClassValidationSummary
+  )
 
-  const status = workspaceSummary?.status ?? "INCOMPLETE"
-  const statusLabel = workspaceSummary?.statusLabel ?? "Belum lengkap"
-  const conflictsCount = workspaceSummary?.activeConflictsCount ?? 0
-  const warningsCount = workspaceSummary?.completenessWarningsCount ?? 0
+  const summary =
+    scope === "active-class"
+      ? getActiveClassSummary()
+      : getWorkspaceSummary()
+
+  const status = summary?.status ?? "INCOMPLETE"
+  const statusLabel = summary?.statusLabel ?? VALIDATION_STATUS_LABELS[status]
+  const conflictsCount = summary?.activeConflictsCount ?? 0
+  const warningsCount = summary?.completenessWarningsCount ?? 0
 
   const ariaLabel = `Status Validasi: ${statusLabel}`
 
@@ -68,7 +83,11 @@ export function ConflictStatusBadge({
       role="button"
       aria-label={ariaLabel}
       onClick={onOpenConflictList}
-      className={`inline-flex h-7 items-center gap-1.5 border px-2.5 text-xs font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer select-none ${style}`}
+      className={cn(
+        "inline-flex h-7 items-center gap-1.5 border px-2.5 text-xs font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer select-none",
+        style,
+        className
+      )}
     >
       {icon}
       <span>{label}</span>

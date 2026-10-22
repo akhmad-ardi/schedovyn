@@ -5,11 +5,13 @@ import {
 import { create } from "zustand"
 import { minutesToTime, timeToMinutes } from "@/domain/time/time-utils"
 import * as workspaceRepo from "@/db/workspace-repository"
-import type {
-  CompletenessWarning,
-  ScheduleConflict,
-  ScopeValidationSummary,
-  WorkspaceValidationReport,
+import {
+  type CompletenessWarning,
+  type ScheduleConflict,
+  type ScopeValidationSummary,
+  type WorkspaceValidationReport,
+  type ClassValidationMatrixItem,
+  VALIDATION_STATUS_LABELS,
 } from "@/domain/types/validation"
 import { evaluateWorkspaceValidation } from "@/domain/validation/workspace-validator"
 import {
@@ -95,7 +97,9 @@ export interface WorkspaceStoreState {
   validationReport: WorkspaceValidationReport | null
 
   revalidateWorkspace: () => void
+  getWorkspaceValidationSummary: () => ScopeValidationSummary | null
   getActiveClassValidationSummary: () => ScopeValidationSummary | null
+  getAllClassesValidationSummaries: () => ClassValidationMatrixItem[]
   getSessionConflicts: (sessionId: string) => ScheduleConflict[]
   getSessionWarnings: (sessionId: string) => CompletenessWarning[]
   getActiveClassUnscheduledSummary: () => ClassUnscheduledSummary
@@ -302,18 +306,22 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
       )
 
       if (currentSequence === mutationSequence) {
-        set((state) => ({
-          workspace: state.workspace
+        set((state) => {
+          const ws = state.workspace
             ? {
                 ...state.workspace,
                 updatedAt: savedWorkspace.updatedAt,
               }
-            : savedWorkspace,
-          saveStatus: "saved",
-          lastSavedAt: savedWorkspace.updatedAt,
-          saveErrorMessage: null,
-          saveErrorInfo: null,
-        }))
+            : savedWorkspace
+          return {
+            workspace: ws,
+            validationReport: runValidation({ workspace: ws, dayConfigs: nextDayConfigs }),
+            saveStatus: "saved",
+            lastSavedAt: savedWorkspace.updatedAt,
+            saveErrorMessage: null,
+            saveErrorInfo: null,
+          }
+        })
       }
       return true
     } catch (error) {
@@ -602,14 +610,16 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           workspace,
           newClassGroup
         )
-        set((state) => ({
+        const nextClasses = [...get().classes, newClassGroup]
+        set({
           workspace: updatedWorkspace,
-          classes: [...state.classes, newClassGroup],
+          classes: nextClasses,
+          validationReport: runValidation({ classes: nextClasses }),
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
           saveErrorInfo: null,
-        }))
+        })
         return { ok: true, data: newClassGroup, validation }
       } catch (error) {
         const errorInfo = diagnoseStorageError(error)
@@ -651,16 +661,18 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           workspace,
           updatedClassGroup
         )
-        set((state) => ({
+        const nextClasses = get().classes.map((cls) =>
+          cls.id === classId ? updatedClassGroup : cls
+        )
+        set({
           workspace: updatedWorkspace,
-          classes: state.classes.map((cls) =>
-            cls.id === classId ? updatedClassGroup : cls
-          ),
+          classes: nextClasses,
+          validationReport: runValidation({ classes: nextClasses }),
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
           saveErrorInfo: null,
-        }))
+        })
         return { ok: true, data: updatedClassGroup, validation }
       } catch (error) {
         const errorInfo = diagnoseStorageError(error)
@@ -683,18 +695,23 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
       try {
         const { updatedWorkspace, remainingClasses } =
           await workspaceRepo.deleteClassGroupCascade(workspace, classId)
-        set((state) => ({
+        const nextReqs = get().requirements.filter((req) => req.classId !== classId)
+        const nextSessions = get().sessions.filter((ses) => ses.classId !== classId)
+        set({
           workspace: updatedWorkspace,
           classes: remainingClasses,
-          requirements: state.requirements.filter(
-            (req) => req.classId !== classId
-          ),
-          sessions: state.sessions.filter((ses) => ses.classId !== classId),
+          requirements: nextReqs,
+          sessions: nextSessions,
+          validationReport: runValidation({
+            classes: remainingClasses,
+            requirements: nextReqs,
+            sessions: nextSessions,
+          }),
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
           saveErrorInfo: null,
-        }))
+        })
         return true
       } catch (error) {
         const errorInfo = diagnoseStorageError(error)
@@ -732,14 +749,16 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           workspace,
           newSubject
         )
-        set((state) => ({
+        const nextSubjects = [...get().subjects, newSubject]
+        set({
           workspace: updatedWorkspace,
-          subjects: [...state.subjects, newSubject],
+          subjects: nextSubjects,
+          validationReport: runValidation({ subjects: nextSubjects }),
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
           saveErrorInfo: null,
-        }))
+        })
         return { ok: true, data: newSubject, validation }
       } catch (error) {
         const errorInfo = diagnoseStorageError(error)
@@ -781,16 +800,18 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           workspace,
           updatedSubject
         )
-        set((state) => ({
+        const nextSubjects = get().subjects.map((sub) =>
+          sub.id === subjectId ? updatedSubject : sub
+        )
+        set({
           workspace: updatedWorkspace,
-          subjects: state.subjects.map((sub) =>
-            sub.id === subjectId ? updatedSubject : sub
-          ),
+          subjects: nextSubjects,
+          validationReport: runValidation({ subjects: nextSubjects }),
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
           saveErrorInfo: null,
-        }))
+        })
         return { ok: true, data: updatedSubject, validation }
       } catch (error) {
         const errorInfo = diagnoseStorageError(error)
@@ -828,18 +849,24 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         }
 
         const updatedWorkspace = result.updatedWorkspace ?? workspace
-        set((state) => ({
+        const nextSubjects = get().subjects.filter((sub) => sub.id !== subjectId)
+        const nextReqs = get().requirements.filter((req) => req.subjectId !== subjectId)
+        const nextSessions = get().sessions.filter((ses) => ses.subjectId !== subjectId)
+        set({
           workspace: updatedWorkspace,
-          subjects: state.subjects.filter((sub) => sub.id !== subjectId),
-          requirements: state.requirements.filter(
-            (req) => req.subjectId !== subjectId
-          ),
-          sessions: state.sessions.filter((ses) => ses.subjectId !== subjectId),
+          subjects: nextSubjects,
+          requirements: nextReqs,
+          sessions: nextSessions,
+          validationReport: runValidation({
+            subjects: nextSubjects,
+            requirements: nextReqs,
+            sessions: nextSessions,
+          }),
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
           saveErrorInfo: null,
-        }))
+        })
 
         return {
           ok: true,
@@ -884,14 +911,16 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           workspace,
           newTeacher
         )
-        set((state) => ({
+        const nextTeachers = [...get().teachers, newTeacher]
+        set({
           workspace: updatedWorkspace,
-          teachers: [...state.teachers, newTeacher],
+          teachers: nextTeachers,
+          validationReport: runValidation({ teachers: nextTeachers }),
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
           saveErrorInfo: null,
-        }))
+        })
         return { ok: true, data: newTeacher, validation }
       } catch (error) {
         const errorInfo = diagnoseStorageError(error)
@@ -934,16 +963,18 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           workspace,
           updatedTeacher
         )
-        set((state) => ({
+        const nextTeachers = get().teachers.map((tch) =>
+          tch.id === teacherId ? updatedTeacher : tch
+        )
+        set({
           workspace: updatedWorkspace,
-          teachers: state.teachers.map((tch) =>
-            tch.id === teacherId ? updatedTeacher : tch
-          ),
+          teachers: nextTeachers,
+          validationReport: runValidation({ teachers: nextTeachers }),
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
           saveErrorInfo: null,
-        }))
+        })
         return { ok: true, data: updatedTeacher, validation }
       } catch (error) {
         const errorInfo = diagnoseStorageError(error)
@@ -968,22 +999,28 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           workspace,
           teacherId
         )
-        set((state) => ({
+        const nextTeachers = get().teachers.filter((tch) => tch.id !== teacherId)
+        const nextReqs = get().requirements.map((req) =>
+          req.defaultTeacherId === teacherId ? { ...req, defaultTeacherId: null } : req
+        )
+        const nextSessions = get().sessions.map((ses) =>
+          ses.teacherId === teacherId ? { ...ses, teacherId: null } : ses
+        )
+        set({
           workspace: updatedWorkspace,
-          teachers: state.teachers.filter((tch) => tch.id !== teacherId),
-          requirements: state.requirements.map((req) =>
-            req.defaultTeacherId === teacherId
-              ? { ...req, defaultTeacherId: null }
-              : req
-          ),
-          sessions: state.sessions.map((ses) =>
-            ses.teacherId === teacherId ? { ...ses, teacherId: null } : ses
-          ),
+          teachers: nextTeachers,
+          requirements: nextReqs,
+          sessions: nextSessions,
+          validationReport: runValidation({
+            teachers: nextTeachers,
+            requirements: nextReqs,
+            sessions: nextSessions,
+          }),
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
           saveErrorInfo: null,
-        }))
+        })
         return true
       } catch (error) {
         const errorInfo = diagnoseStorageError(error)
@@ -1022,14 +1059,16 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           workspace,
           newRoom
         )
-        set((state) => ({
+        const nextRooms = [...get().rooms, newRoom]
+        set({
           workspace: updatedWorkspace,
-          rooms: [...state.rooms, newRoom],
+          rooms: nextRooms,
+          validationReport: runValidation({ rooms: nextRooms }),
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
           saveErrorInfo: null,
-        }))
+        })
         return { ok: true, data: newRoom, validation }
       } catch (error) {
         const errorInfo = diagnoseStorageError(error)
@@ -1073,16 +1112,18 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           workspace,
           updatedRoom
         )
-        set((state) => ({
+        const nextRooms = get().rooms.map((rm) =>
+          rm.id === roomId ? updatedRoom : rm
+        )
+        set({
           workspace: updatedWorkspace,
-          rooms: state.rooms.map((rm) =>
-            rm.id === roomId ? updatedRoom : rm
-          ),
+          rooms: nextRooms,
+          validationReport: runValidation({ rooms: nextRooms }),
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
           saveErrorInfo: null,
-        }))
+        })
         return { ok: true, data: updatedRoom, validation }
       } catch (error) {
         const errorInfo = diagnoseStorageError(error)
@@ -1107,22 +1148,28 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           workspace,
           roomId
         )
-        set((state) => ({
+        const nextRooms = get().rooms.filter((rm) => rm.id !== roomId)
+        const nextReqs = get().requirements.map((req) =>
+          req.defaultRoomId === roomId ? { ...req, defaultRoomId: null } : req
+        )
+        const nextSessions = get().sessions.map((ses) =>
+          ses.roomId === roomId ? { ...ses, roomId: null } : ses
+        )
+        set({
           workspace: updatedWorkspace,
-          rooms: state.rooms.filter((rm) => rm.id !== roomId),
-          requirements: state.requirements.map((req) =>
-            req.defaultRoomId === roomId
-              ? { ...req, defaultRoomId: null }
-              : req
-          ),
-          sessions: state.sessions.map((ses) =>
-            ses.roomId === roomId ? { ...ses, roomId: null } : ses
-          ),
+          rooms: nextRooms,
+          requirements: nextReqs,
+          sessions: nextSessions,
+          validationReport: runValidation({
+            rooms: nextRooms,
+            requirements: nextReqs,
+            sessions: nextSessions,
+          }),
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
           saveErrorInfo: null,
-        }))
+        })
         return true
       } catch (error) {
         const errorInfo = diagnoseStorageError(error)
@@ -1172,14 +1219,16 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           workspace,
           newReq
         )
-        set((state) => ({
+        const nextReqs = [...get().requirements, newReq]
+        set({
           workspace: updatedWorkspace,
-          requirements: [...state.requirements, newReq],
+          requirements: nextReqs,
+          validationReport: runValidation({ requirements: nextReqs }),
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
           saveErrorInfo: null,
-        }))
+        })
         return { ok: true, data: newReq, validation }
       } catch (error) {
         const errorInfo = diagnoseStorageError(error)
@@ -1257,16 +1306,18 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           workspace,
           updatedReq
         )
-        set((state) => ({
+        const nextReqs = get().requirements.map((req) =>
+          req.id === requirementId ? updatedReq : req
+        )
+        set({
           workspace: updatedWorkspace,
-          requirements: state.requirements.map((req) =>
-            req.id === requirementId ? updatedReq : req
-          ),
+          requirements: nextReqs,
+          validationReport: runValidation({ requirements: nextReqs }),
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
           saveErrorInfo: null,
-        }))
+        })
         return { ok: true, data: updatedReq, validation }
       } catch (error) {
         const errorInfo = diagnoseStorageError(error)
@@ -1292,19 +1343,21 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
             workspace,
             requirementId
           )
-        set((state) => ({
+        const nextReqs = get().requirements.filter((req) => req.id !== requirementId)
+        const nextSessions = get().sessions.filter((ses) => ses.requirementId !== requirementId)
+        set({
           workspace: updatedWorkspace,
-          requirements: state.requirements.filter(
-            (req) => req.id !== requirementId
-          ),
-          sessions: state.sessions.filter(
-            (ses) => ses.requirementId !== requirementId
-          ),
+          requirements: nextReqs,
+          sessions: nextSessions,
+          validationReport: runValidation({
+            requirements: nextReqs,
+            sessions: nextSessions,
+          }),
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
           saveErrorInfo: null,
-        }))
+        })
         return true
       } catch (error) {
         const errorInfo = diagnoseStorageError(error)
@@ -1673,10 +1726,33 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
       set({ validationReport: runValidation() })
     },
 
+    getWorkspaceValidationSummary: () => {
+      const { validationReport } = get()
+      return validationReport?.workspaceSummary ?? null
+    },
+
     getActiveClassValidationSummary: () => {
       const { validationReport, workspace } = get()
       if (!validationReport || !workspace?.activeClassId) return null
       return validationReport.byClassId[workspace.activeClassId] ?? null
+    },
+
+    getAllClassesValidationSummaries: () => {
+      const { validationReport, classes } = get()
+      if (!validationReport) return []
+      return classes.map((classGroup) => ({
+        classGroup,
+        summary: validationReport.byClassId[classGroup.id] ?? {
+          status: "INCOMPLETE",
+          statusLabel: VALIDATION_STATUS_LABELS.INCOMPLETE,
+          scheduledSessionsCount: 0,
+          unscheduledSessionsCount: 0,
+          activeConflictsCount: 0,
+          completenessWarningsCount: 0,
+          conflicts: [],
+          warnings: [],
+        },
+      }))
     },
 
     getSessionConflicts: (sessionId: string) => {
