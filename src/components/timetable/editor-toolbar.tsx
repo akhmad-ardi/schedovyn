@@ -1,16 +1,21 @@
 import { useState } from "react"
-import { Redo2Icon, Undo2Icon } from "lucide-react"
+import { FileDownIcon, Redo2Icon, Undo2Icon } from "lucide-react"
 import { ConflictListPanel } from "@/components/conflicts/conflict-list-panel"
 import { ConflictStatusBadge } from "@/components/conflicts/conflict-status-badge"
+import { ExportPdfDialog } from "@/components/export/export-pdf-dialog"
 import { Button } from "@/components/ui/button"
 import { useWorkspaceStore } from "@/store/use-workspace-store"
 
 export function EditorToolbar() {
   const [conflictListOpen, setConflictListOpen] = useState(false)
+  const [exportPdfOpen, setExportPdfOpen] = useState(false)
+
   const undo = useWorkspaceStore((state) => state.undo)
   const redo = useWorkspaceStore((state) => state.redo)
   const pastCount = useWorkspaceStore((state) => state.historyPast?.length ?? 0)
-  const futureCount = useWorkspaceStore((state) => state.historyFuture?.length ?? 0)
+  const futureCount = useWorkspaceStore(
+    (state) => state.historyFuture?.length ?? 0
+  )
   const getUndoActionLabel = useWorkspaceStore(
     (state) => state.getUndoActionLabel
   )
@@ -71,6 +76,20 @@ export function EditorToolbar() {
             <Redo2Icon data-icon="inline-start" className="size-3.5" />
             <span>Ulangi Perubahan</span>
           </Button>
+
+          <div className="mx-1 h-4 w-px bg-border" />
+
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            aria-label="Ekspor PDF"
+            title="Ekspor Jadwal ke Dokumen PDF"
+            onClick={() => setExportPdfOpen(true)}
+          >
+            <FileDownIcon data-icon="inline-start" className="size-3.5" />
+            <span>Ekspor PDF</span>
+          </Button>
         </div>
 
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
@@ -87,6 +106,11 @@ export function EditorToolbar() {
       <ConflictListPanel
         open={conflictListOpen}
         onOpenChange={setConflictListOpen}
+      />
+
+      <ExportPdfDialog
+        open={exportPdfOpen}
+        onOpenChange={setExportPdfOpen}
       />
     </>
   )
