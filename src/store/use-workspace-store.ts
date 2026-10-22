@@ -1,3 +1,7 @@
+import {
+  diagnoseStorageError,
+  type StorageErrorInfo,
+} from "@/domain/storage/storage-diagnostics"
 import { create } from "zustand"
 import { minutesToTime, timeToMinutes } from "@/domain/time/time-utils"
 import * as workspaceRepo from "@/db/workspace-repository"
@@ -55,8 +59,6 @@ import {
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error"
 
-const LOCAL_SAVE_ERROR_MESSAGE =
-  "Gagal menyimpan ke penyimpanan lokal browser. Periksa ruang penyimpanan browser Anda lalu klik Coba Simpan Ulang."
 
 
 export type { ScheduleHistorySnapshot }
@@ -85,6 +87,8 @@ export interface WorkspaceStoreState {
   saveStatus: SaveStatus
   lastSavedAt: string | null
   saveErrorMessage: string | null
+  saveErrorInfo: StorageErrorInfo | null
+  bootError: StorageErrorInfo | null
   selectedSessionId: string | null
   historyPast: ScheduleHistorySnapshot[]
   historyFuture: ScheduleHistorySnapshot[]
@@ -132,6 +136,7 @@ export interface WorkspaceStoreState {
     dayOfWeek: DayOfWeek,
     breakId: string
   ) => Promise<boolean>
+  retryPendingStorageSync: () => Promise<boolean>
   retrySaveWorkspaceSettings: () => Promise<boolean>
 
   // Actions FR-02: Kelas
@@ -286,6 +291,8 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
       configValidation,
       saveStatus: "saving",
       saveErrorMessage: null,
+          saveErrorInfo: null,
+    bootError: null,
     })
 
     try {
@@ -305,14 +312,17 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: savedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         }))
       }
       return true
-    } catch {
+    } catch (error) {
       if (currentSequence === mutationSequence) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
       }
       return false
@@ -338,12 +348,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
     saveStatus: "idle",
     lastSavedAt: null,
     saveErrorMessage: null,
+    saveErrorInfo: null,
+    bootError: null,
 
     bootWorkspace: async () => {
       if (get().isHydrating) {
         return
       }
-      set({ isHydrating: true, saveErrorMessage: null })
+      set({ isHydrating: true, saveErrorMessage: null,
+          saveErrorInfo: null, bootError: null })
 
       try {
         const bundle = await workspaceRepo.loadOrSeedWorkspace()
@@ -379,13 +392,18 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: bundle.workspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
+          bootError: null,
         })
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           isHydrated: true,
           isHydrating: false,
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
+          bootError: errorInfo,
         })
       }
     },
@@ -506,13 +524,57 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
       return applyAndPersistConfig(workspace, nextDayConfigs)
     },
 
-    retrySaveWorkspaceSettings: async () => {
-      const { workspace, dayConfigs } = get()
-      if (!workspace) {
+    retryPendingStorageSync: async () => {
+      const state = get()
+      if (!state.workspace) {
         return false
       }
 
-      return applyAndPersistConfig(workspace, dayConfigs)
+      const currentSequence = ++mutationSequence
+      set({
+        saveStatus: "saving",
+        saveErrorMessage: null,
+          saveErrorInfo: null,
+      })
+
+      try {
+        const updatedWorkspace =
+          await workspaceRepo.persistFullWorkspaceSnapshot({
+            workspace: state.workspace,
+            dayConfigs: state.dayConfigs,
+            classes: state.classes,
+            subjects: state.subjects,
+            teachers: state.teachers,
+            rooms: state.rooms,
+            requirements: state.requirements,
+            sessions: state.sessions,
+          })
+
+        if (currentSequence === mutationSequence) {
+          set({
+            workspace: updatedWorkspace,
+            saveStatus: "saved",
+            lastSavedAt: updatedWorkspace.updatedAt,
+            saveErrorMessage: null,
+          saveErrorInfo: null,
+          })
+        }
+        return true
+      } catch (error) {
+        if (currentSequence === mutationSequence) {
+          const errorInfo = diagnoseStorageError(error)
+          set({
+            saveStatus: "error",
+            saveErrorMessage: errorInfo.message,
+            saveErrorInfo: errorInfo,
+          })
+        }
+        return false
+      }
+    },
+
+    retrySaveWorkspaceSettings: async () => {
+      return get().retryPendingStorageSync()
     },
 
     createClassGroup: async (input) => {
@@ -534,7 +596,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         notes: input.notes?.trim() ? input.notes.trim() : undefined,
       }
 
-      set({ saveStatus: "saving", saveErrorMessage: null })
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
       try {
         const updatedWorkspace = await workspaceRepo.saveClassGroup(
           workspace,
@@ -546,12 +608,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         }))
         return { ok: true, data: newClassGroup, validation }
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return { ok: false }
       }
@@ -580,7 +645,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         notes: input.notes?.trim() ? input.notes.trim() : undefined,
       }
 
-      set({ saveStatus: "saving", saveErrorMessage: null })
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
       try {
         const updatedWorkspace = await workspaceRepo.saveClassGroup(
           workspace,
@@ -594,12 +659,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         }))
         return { ok: true, data: updatedClassGroup, validation }
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return { ok: false }
       }
@@ -611,7 +679,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         return false
       }
 
-      set({ saveStatus: "saving", saveErrorMessage: null })
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
       try {
         const { updatedWorkspace, remainingClasses } =
           await workspaceRepo.deleteClassGroupCascade(workspace, classId)
@@ -625,12 +693,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         }))
         return true
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return false
       }
@@ -655,7 +726,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         notes: input.notes?.trim() ? input.notes.trim() : undefined,
       }
 
-      set({ saveStatus: "saving", saveErrorMessage: null })
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
       try {
         const updatedWorkspace = await workspaceRepo.saveSubject(
           workspace,
@@ -667,12 +738,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         }))
         return { ok: true, data: newSubject, validation }
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return { ok: false }
       }
@@ -701,7 +775,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         notes: input.notes?.trim() ? input.notes.trim() : undefined,
       }
 
-      set({ saveStatus: "saving", saveErrorMessage: null })
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
       try {
         const updatedWorkspace = await workspaceRepo.saveSubject(
           workspace,
@@ -715,12 +789,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         }))
         return { ok: true, data: updatedSubject, validation }
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return { ok: false }
       }
@@ -732,7 +809,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         return { ok: false }
       }
 
-      set({ saveStatus: "saving", saveErrorMessage: null })
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
       try {
         const result = await workspaceRepo.deleteSubjectWithCheck(
           workspace,
@@ -741,7 +818,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         )
 
         if (!result.deleted) {
-          set({ saveStatus: "saved", saveErrorMessage: null })
+          set({ saveStatus: "saved", saveErrorMessage: null, saveErrorInfo: null })
           return {
             ok: false,
             requiresConfirmation: result.requiresConfirmation,
@@ -761,6 +838,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         }))
 
         return {
@@ -769,10 +847,12 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           dependentRequirementsCount: result.dependentRequirementsCount,
           dependentSessionsCount: result.dependentSessionsCount,
         }
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return { ok: false }
       }
@@ -797,7 +877,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         unavailableIntervals: input.unavailableIntervals ?? [],
       }
 
-      set({ saveStatus: "saving", saveErrorMessage: null })
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
 
       try {
         const updatedWorkspace = await workspaceRepo.saveTeacher(
@@ -810,12 +890,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         }))
         return { ok: true, data: newTeacher, validation }
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return { ok: false }
       }
@@ -845,7 +928,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           input.unavailableIntervals ?? existing.unavailableIntervals,
       }
 
-      set({ saveStatus: "saving", saveErrorMessage: null })
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
       try {
         const updatedWorkspace = await workspaceRepo.saveTeacher(
           workspace,
@@ -859,12 +942,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         }))
         return { ok: true, data: updatedTeacher, validation }
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return { ok: false }
       }
@@ -876,7 +962,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         return false
       }
 
-      set({ saveStatus: "saving", saveErrorMessage: null })
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
       try {
         const updatedWorkspace = await workspaceRepo.deleteTeacherAndUnassign(
           workspace,
@@ -896,12 +982,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         }))
         return true
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return false
       }
@@ -927,7 +1016,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         unavailableIntervals: input.unavailableIntervals ?? [],
       }
 
-      set({ saveStatus: "saving", saveErrorMessage: null })
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
       try {
         const updatedWorkspace = await workspaceRepo.saveRoom(
           workspace,
@@ -939,12 +1028,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         }))
         return { ok: true, data: newRoom, validation }
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return { ok: false }
       }
@@ -975,7 +1067,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           input.unavailableIntervals ?? existing.unavailableIntervals,
       }
 
-      set({ saveStatus: "saving", saveErrorMessage: null })
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
       try {
         const updatedWorkspace = await workspaceRepo.saveRoom(
           workspace,
@@ -989,12 +1081,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         }))
         return { ok: true, data: updatedRoom, validation }
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return { ok: false }
       }
@@ -1006,7 +1101,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         return false
       }
 
-      set({ saveStatus: "saving", saveErrorMessage: null })
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
       try {
         const updatedWorkspace = await workspaceRepo.deleteRoomAndUnassign(
           workspace,
@@ -1026,12 +1121,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         }))
         return true
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return false
       }
@@ -1068,7 +1166,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         notes: input.notes?.trim() ? input.notes.trim() : undefined,
       }
 
-      set({ saveStatus: "saving", saveErrorMessage: null })
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
       try {
         const updatedWorkspace = await workspaceRepo.saveTeachingRequirement(
           workspace,
@@ -1080,12 +1178,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         }))
         return { ok: true, data: newReq, validation }
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return { ok: false }
       }
@@ -1150,7 +1251,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         notes: mergedInput.notes?.trim() ? mergedInput.notes.trim() : undefined,
       }
 
-      set({ saveStatus: "saving", saveErrorMessage: null })
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
       try {
         const updatedWorkspace = await workspaceRepo.saveTeachingRequirement(
           workspace,
@@ -1164,12 +1265,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         }))
         return { ok: true, data: updatedReq, validation }
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return { ok: false }
       }
@@ -1181,7 +1285,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         return false
       }
 
-      set({ saveStatus: "saving", saveErrorMessage: null })
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
       try {
         const updatedWorkspace =
           await workspaceRepo.deleteTeachingRequirementCascade(
@@ -1199,12 +1303,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: updatedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         }))
         return true
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return false
       }
@@ -1234,6 +1341,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         validationReport: runValidation({ workspace: nextWorkspace }),
         saveStatus: "saving",
         saveErrorMessage: null,
+          saveErrorInfo: null,
       })
 
       try {
@@ -1246,13 +1354,16 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: savedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         })
         return true
       } catch (error) {
         console.error("Gagal menyimpan pilihan kelas aktif lokal:", error)
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return false
       }
@@ -1311,6 +1422,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         validationReport: runValidation({ sessions: nextSessions }),
         saveStatus: "saving",
         saveErrorMessage: null,
+          saveErrorInfo: null,
       })
 
       try {
@@ -1323,12 +1435,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: savedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         })
         return true
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return false
       }
@@ -1377,6 +1492,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         validationReport: runValidation({ sessions: nextSessions }),
         saveStatus: "saving",
         saveErrorMessage: null,
+          saveErrorInfo: null,
       })
 
       try {
@@ -1389,12 +1505,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: savedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         })
         return true
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return false
       }
@@ -1468,6 +1587,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         validationReport: runValidation({ sessions: nextSessions }),
         saveStatus: "saving",
         saveErrorMessage: null,
+          saveErrorInfo: null,
       })
 
       try {
@@ -1480,12 +1600,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: savedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         })
         return true
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return false
       }
@@ -1519,6 +1642,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         validationReport: runValidation({ sessions: nextSessions }),
         saveStatus: "saving",
         saveErrorMessage: null,
+          saveErrorInfo: null,
       })
 
       try {
@@ -1531,12 +1655,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: savedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         })
         return true
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return false
       }
@@ -1646,6 +1773,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         validationReport: runValidation({ sessions: restoredSessions }),
         saveStatus: "saving",
         saveErrorMessage: null,
+          saveErrorInfo: null,
       })
 
       try {
@@ -1658,12 +1786,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: savedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         })
         return true
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return false
       }
@@ -1694,6 +1825,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         validationReport: runValidation({ sessions: restoredSessions }),
         saveStatus: "saving",
         saveErrorMessage: null,
+          saveErrorInfo: null,
       })
 
       try {
@@ -1706,12 +1838,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveStatus: "saved",
           lastSavedAt: savedWorkspace.updatedAt,
           saveErrorMessage: null,
+          saveErrorInfo: null,
         })
         return true
-      } catch {
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
-          saveErrorMessage: LOCAL_SAVE_ERROR_MESSAGE,
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
         })
         return false
       }

@@ -618,3 +618,95 @@ export async function deleteTimetableSession(
 
   return updatedWorkspace
 }
+
+export async function persistFullWorkspaceSnapshot(
+  snapshot: HydratedWorkspaceBundle,
+  database: SchedovynDatabase = defaultDb
+): Promise<Workspace> {
+  const updatedWorkspace: Workspace = {
+    ...snapshot.workspace,
+    updatedAt: new Date().toISOString(),
+  }
+
+  await database.transaction(
+    "rw",
+    [
+      database.workspaces,
+      database.dayConfigs,
+      database.classes,
+      database.subjects,
+      database.teachers,
+      database.rooms,
+      database.requirements,
+      database.sessions,
+    ],
+    async () => {
+      await database.workspaces.put(updatedWorkspace)
+
+      // Hari belajar
+      await database.dayConfigs
+        .where("workspaceId")
+        .equals(updatedWorkspace.id)
+        .delete()
+      if (snapshot.dayConfigs.length > 0) {
+        await database.dayConfigs.bulkPut(snapshot.dayConfigs)
+      }
+
+      // Master Data Kelas
+      await database.classes
+        .where("workspaceId")
+        .equals(updatedWorkspace.id)
+        .delete()
+      if (snapshot.classes.length > 0) {
+        await database.classes.bulkPut(snapshot.classes)
+      }
+
+      // Master Data Mata Pelajaran
+      await database.subjects
+        .where("workspaceId")
+        .equals(updatedWorkspace.id)
+        .delete()
+      if (snapshot.subjects.length > 0) {
+        await database.subjects.bulkPut(snapshot.subjects)
+      }
+
+      // Master Data Guru
+      await database.teachers
+        .where("workspaceId")
+        .equals(updatedWorkspace.id)
+        .delete()
+      if (snapshot.teachers.length > 0) {
+        await database.teachers.bulkPut(snapshot.teachers)
+      }
+
+      // Master Data Ruangan
+      await database.rooms
+        .where("workspaceId")
+        .equals(updatedWorkspace.id)
+        .delete()
+      if (snapshot.rooms.length > 0) {
+        await database.rooms.bulkPut(snapshot.rooms)
+      }
+
+      // Master Data Kebutuhan Pembelajaran
+      await database.requirements
+        .where("workspaceId")
+        .equals(updatedWorkspace.id)
+        .delete()
+      if (snapshot.requirements.length > 0) {
+        await database.requirements.bulkPut(snapshot.requirements)
+      }
+
+      // Data Sesi Jadwal
+      await database.sessions
+        .where("workspaceId")
+        .equals(updatedWorkspace.id)
+        .delete()
+      if (snapshot.sessions.length > 0) {
+        await database.sessions.bulkPut(snapshot.sessions)
+      }
+    }
+  )
+
+  return updatedWorkspace
+}

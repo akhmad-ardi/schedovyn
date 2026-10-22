@@ -50,9 +50,10 @@ export function AppShell({ children }: AppShellProps) {
   const workspace = useWorkspaceStore((state) => state.workspace)
   const saveStatus = useWorkspaceStore((state) => state.saveStatus)
   const saveErrorMessage = useWorkspaceStore((state) => state.saveErrorMessage)
+  const bootError = useWorkspaceStore((state) => state.bootError)
   const bootWorkspace = useWorkspaceStore((state) => state.bootWorkspace)
-  const retrySaveWorkspaceSettings = useWorkspaceStore(
-    (state) => state.retrySaveWorkspaceSettings
+  const retryPendingStorageSync = useWorkspaceStore(
+    (state) => state.retryPendingStorageSync
   )
 
   const [themeControl, setThemeControl] = React.useState<{
@@ -65,6 +66,42 @@ export function AppShell({ children }: AppShellProps) {
       void bootWorkspace()
     }
   }, [isHydrated, isHydrating, bootWorkspace])
+
+  if (bootError) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-background p-6 text-foreground">
+        <div className="w-full max-w-md border border-destructive/40 bg-card p-6 shadow-md">
+          <div className="flex items-center gap-2.5 text-destructive mb-3">
+            <AlertTriangleIcon className="size-5 shrink-0" />
+            <h1 className="font-heading text-base font-semibold tracking-tight">
+              {bootError.title}
+            </h1>
+          </div>
+          <p className="text-xs text-muted-foreground mb-4 leading-relaxed">
+            {bootError.message}
+          </p>
+          <div className="border border-border bg-muted/50 p-3 text-xs text-foreground mb-6">
+            <span className="font-semibold block mb-1">Panduan:</span>
+            <p className="text-muted-foreground leading-relaxed">
+              {bootError.userActionGuidance}
+            </p>
+          </div>
+          <div className="flex items-center justify-end">
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              onClick={() => {
+                window.location.reload()
+              }}
+            >
+              Muat Ulang Halaman
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
@@ -143,7 +180,7 @@ export function AppShell({ children }: AppShellProps) {
                 variant="outline"
                 size="xs"
                 onClick={() => {
-                  void retrySaveWorkspaceSettings()
+                  void retryPendingStorageSync()
                 }}
               >
                 <RotateCcwIcon data-icon="inline-start" />
