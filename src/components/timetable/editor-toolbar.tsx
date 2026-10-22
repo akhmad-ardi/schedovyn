@@ -1,5 +1,6 @@
 import { useState } from "react"
 import {
+  CopyIcon,
   FileDownIcon,
   FileSpreadsheetIcon,
   Redo2Icon,
@@ -7,6 +8,7 @@ import {
 } from "lucide-react"
 import { ConflictListPanel } from "@/components/conflicts/conflict-list-panel"
 import { ConflictStatusBadge } from "@/components/conflicts/conflict-status-badge"
+import { CopyScheduleDialog } from "@/components/timetable/copy-schedule-dialog"
 import { ExportExcelDialog } from "@/components/export/export-excel-dialog"
 import { ExportPdfDialog } from "@/components/export/export-pdf-dialog"
 import { Button } from "@/components/ui/button"
@@ -14,6 +16,7 @@ import { useWorkspaceStore } from "@/store/use-workspace-store"
 
 export function EditorToolbar() {
   const [conflictListOpen, setConflictListOpen] = useState(false)
+  const [copyScheduleOpen, setCopyScheduleOpen] = useState(false)
   const [exportPdfOpen, setExportPdfOpen] = useState(false)
   const [exportExcelOpen, setExportExcelOpen] = useState(false)
 
@@ -90,6 +93,18 @@ export function EditorToolbar() {
             type="button"
             variant="outline"
             size="xs"
+            aria-label="Salin Jadwal"
+            title="Salin Susunan Jadwal ke Kelas Lain"
+            onClick={() => setCopyScheduleOpen(true)}
+          >
+            <CopyIcon data-icon="inline-start" className="size-3.5" />
+            <span>Salin Jadwal</span>
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
             aria-label="Ekspor PDF"
             title="Ekspor Jadwal ke Dokumen PDF"
             onClick={() => setExportPdfOpen(true)}
@@ -128,6 +143,11 @@ export function EditorToolbar() {
       <ConflictListPanel
         open={conflictListOpen}
         onOpenChange={setConflictListOpen}
+      />
+
+      <CopyScheduleDialog
+        open={copyScheduleOpen}
+        onOpenChange={setCopyScheduleOpen}
       />
 
       <ExportPdfDialog

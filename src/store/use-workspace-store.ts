@@ -1,4 +1,8 @@
 import {
+  cloneClassSchedule,
+  type CopyScheduleOptions,
+} from "@/domain/timetable/schedule-copier"
+import {
   diagnoseStorageError,
   type StorageErrorInfo,
 } from "@/domain/storage/storage-diagnostics"
@@ -60,6 +64,15 @@ import {
 } from "@/domain/validation/workspace-config-validator"
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error"
+export interface CopyScheduleOutcome {
+  ok: boolean
+  copiedCount: number
+  replacedCount: number
+  newConflictsCount: number
+  targetClassId: string
+  unmatchedSubjectIds: string[]
+  error?: string
+}
 
 
 
@@ -230,6 +243,9 @@ export interface WorkspaceStoreState {
   canRedo: () => boolean
   getUndoActionLabel: () => string | null
   getRedoActionLabel: () => string | null
+  copyClassSchedule: (
+    options: CopyScheduleOptions
+  ) => Promise<CopyScheduleOutcome>
 }
 
 export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
@@ -1925,6 +1941,144 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveErrorInfo: errorInfo,
         })
         return false
+      }
+    },
+
+    copyClassSchedule: async (options) => {
+      const {
+        workspace,
+        classes,
+        requirements,
+        sessions,
+        historyPast,
+        historyFuture,
+      } = get()
+
+      if (!workspace) {
+        return {
+          ok: false,
+          copiedCount: 0,
+          replacedCount: 0,
+          newConflictsCount: 0,
+          targetClassId: options.targetClassId,
+          unmatchedSubjectIds: [],
+          error: "Ruang kerja belum siap.",
+        }
+      }
+
+      const sourceClass = classes.find((c) => c.id === options.sourceClassId)
+      const targetClass = classes.find((c) => c.id === options.targetClassId)
+
+      if (!sourceClass || !targetClass) {
+        return {
+          ok: false,
+          copiedCount: 0,
+          replacedCount: 0,
+          newConflictsCount: 0,
+          targetClassId: options.targetClassId,
+          unmatchedSubjectIds: [],
+          error: "Kelas sumber atau kelas tujuan tidak ditemukan.",
+        }
+      }
+
+      const cloneResult = cloneClassSchedule({
+        sourceSessions: sessions,
+        targetRequirements: requirements,
+        options,
+      })
+
+      if (!cloneResult.ok) {
+        return {
+          ok: false,
+          copiedCount: 0,
+          replacedCount: 0,
+          newConflictsCount: 0,
+          targetClassId: options.targetClassId,
+          unmatchedSubjectIds: cloneResult.unmatchedSubjectIds,
+          error: cloneResult.error,
+        }
+      }
+
+      let nextSessions: TimetableSession[]
+      let replacedCount: number
+
+      if (options.conflictResolution === "replace") {
+        const oldTargetSessions = sessions.filter(
+          (s) => s.classId === options.targetClassId
+        )
+        replacedCount = oldTargetSessions.length
+        nextSessions = [
+          ...sessions.filter((s) => s.classId !== options.targetClassId),
+          ...cloneResult.copiedSessions,
+        ]
+      } else {
+        replacedCount = 0
+        nextSessions = [...sessions, ...cloneResult.copiedSessions]
+      }
+
+      const actionLabel = formatScheduleActionLabel({
+        type: "copy_class",
+        sourceClassName: sourceClass.name,
+        targetClassName: targetClass.name,
+      })
+
+      const nextHistory = recordHistoryStep(
+        { past: historyPast, future: historyFuture },
+        sessions,
+        actionLabel
+      )
+
+      const newValidationReport = runValidation({ sessions: nextSessions })
+      const targetSummary = newValidationReport.byClassId[options.targetClassId]
+      const newConflictsCount = targetSummary?.activeConflictsCount ?? 0
+
+      set({
+        historyPast: nextHistory.past,
+        historyFuture: nextHistory.future,
+        sessions: nextSessions,
+        validationReport: newValidationReport,
+        saveStatus: "saving",
+        saveErrorMessage: null,
+        saveErrorInfo: null,
+      })
+
+      try {
+        const savedWorkspace = await workspaceRepo.batchSaveTimetableSessions(
+          workspace,
+          nextSessions
+        )
+        set({
+          workspace: savedWorkspace,
+          saveStatus: "saved",
+          lastSavedAt: savedWorkspace.updatedAt,
+          saveErrorMessage: null,
+          saveErrorInfo: null,
+        })
+
+        return {
+          ok: true,
+          copiedCount: cloneResult.copiedSessions.length,
+          replacedCount,
+          newConflictsCount,
+          targetClassId: options.targetClassId,
+          unmatchedSubjectIds: cloneResult.unmatchedSubjectIds,
+        }
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
+        set({
+          saveStatus: "error",
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
+        })
+        return {
+          ok: false,
+          copiedCount: cloneResult.copiedSessions.length,
+          replacedCount,
+          newConflictsCount,
+          targetClassId: options.targetClassId,
+          unmatchedSubjectIds: cloneResult.unmatchedSubjectIds,
+          error: errorInfo.message,
+        }
       }
     },
   }

@@ -99,7 +99,7 @@ export function performHistoryUndo(
  * Menjalankan operasi Redo:
  * 1. Mengambil snapshot pertama dari future.
  * 2. Mendorong state sessions saat ini ke bagian akhir past.
- * 3. Mengembalikan state history baru dan array sessions yang dipulihkan.
+ * 3. Mengembalikan state history baru dan array sessions yang diterapkan ulang.
  * Mengembalikan null jika tumpukan future kosong.
  */
 export function performHistoryRedo(
@@ -123,8 +123,8 @@ export function performHistoryRedo(
     sessions: structuredClone(currentSessions) as TimetableSession[],
   }
 
-  const nextFuture = history.future.slice(1)
   const nextPast = [...history.past.slice(-(MAX_HISTORY_STEPS - 1)), currentSnapshot]
+  const nextFuture = history.future.slice(1)
 
   return {
     nextHistory: {
@@ -142,18 +142,34 @@ export function performHistoryRedo(
  * Parameter untuk membentuk label tindakan riwayat.
  */
 export interface ActionLabelParams {
-  type: "place" | "move" | "update_details" | "update_time" | "remove"
+  type:
+    | "place"
+    | "move"
+    | "update_details"
+    | "update_time"
+    | "remove"
+    | "copy_class"
   subjectName?: string
   dayLabel?: string
   timeRange?: string
   extraDetail?: string
+  sourceClassName?: string
+  targetClassName?: string
 }
 
 /**
  * Membentuk label tindakan Bahasa Indonesia yang deskriptif untuk berbagai jenis mutasi jadwal.
  */
 export function formatScheduleActionLabel(params: ActionLabelParams): string {
-  const { type, subjectName, dayLabel, timeRange, extraDetail } = params
+  const {
+    type,
+    subjectName,
+    dayLabel,
+    timeRange,
+    extraDetail,
+    sourceClassName,
+    targetClassName,
+  } = params
 
   switch (type) {
     case "place":
@@ -203,5 +219,11 @@ export function formatScheduleActionLabel(params: ActionLabelParams): string {
         return `Lepas sesi ${subjectName} dari grid`
       }
       return "Lepas sesi dari grid"
+
+    case "copy_class":
+      if (sourceClassName && targetClassName) {
+        return `Salin jadwal dari ${sourceClassName} ke ${targetClassName}`
+      }
+      return "Salin jadwal kelas"
   }
 }
