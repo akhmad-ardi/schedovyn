@@ -1,6 +1,7 @@
 import { AlertTriangleIcon } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { DayScheduleConfigCard } from "@/components/workspace/day-schedule-config-card"
+import { WorkspaceDataManagementCard } from "@/components/workspace/workspace-data-management-card"
 import { WorkspaceIdentityCard } from "@/components/workspace/workspace-identity-card"
 import { useWorkspaceStore } from "@/store/use-workspace-store"
 
@@ -41,6 +42,7 @@ export function SettingsPage() {
 
       <WorkspaceIdentityCard />
       <DayScheduleConfigCard />
+      <WorkspaceDataManagementCard />
     </div>
   )
 }

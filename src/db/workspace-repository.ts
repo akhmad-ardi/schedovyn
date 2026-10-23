@@ -710,3 +710,138 @@ export async function persistFullWorkspaceSnapshot(
 
   return updatedWorkspace
 }
+
+
+/**
+ * Menerapkan kumpulan data seed default lengkap ke seluruh 8 stores IndexedDB.
+ * Kelas aktif otomatis disetel ke kelas pertama (VII-A).
+ */
+export async function applyFullDefaultSeed(
+  database: SchedovynDatabase = defaultDb
+): Promise<HydratedWorkspaceBundle> {
+  const seed = createDefaultWorkspaceSeed()
+  const activeClassId = seed.classes[0]?.id ?? null
+  const seededWorkspace: Workspace = {
+    ...seed.workspace,
+    activeClassId,
+    updatedAt: new Date().toISOString(),
+  }
+
+  return database.transaction(
+    "rw",
+    [
+      database.workspaces,
+      database.dayConfigs,
+      database.classes,
+      database.subjects,
+      database.teachers,
+      database.rooms,
+      database.requirements,
+      database.sessions,
+    ],
+    async () => {
+      await Promise.all([
+        database.workspaces.clear(),
+        database.dayConfigs.clear(),
+        database.classes.clear(),
+        database.subjects.clear(),
+        database.teachers.clear(),
+        database.rooms.clear(),
+        database.requirements.clear(),
+        database.sessions.clear(),
+      ])
+
+      await database.workspaces.put(seededWorkspace)
+      await Promise.all([
+        database.dayConfigs.bulkPut(seed.dayConfigs),
+        database.classes.bulkPut(seed.classes),
+        database.subjects.bulkPut(seed.subjects),
+        database.teachers.bulkPut(seed.teachers),
+        database.rooms.bulkPut(seed.rooms),
+        database.requirements.bulkPut(seed.requirements),
+        database.sessions.bulkPut(seed.sessions),
+      ])
+
+      return {
+        workspace: seededWorkspace,
+        dayConfigs: sortDayConfigs(seed.dayConfigs),
+        classes: seed.classes,
+        subjects: seed.subjects,
+        teachers: seed.teachers,
+        rooms: seed.rooms,
+        requirements: seed.requirements,
+        sessions: seed.sessions,
+      }
+    }
+  )
+}
+
+/**
+ * Menghapus seluruh data seed / master data dan sesi jadwal dari database lokal,
+ * mereset activeClassId menjadi null, namun mempertahankan konfigurasi ruang kerja & hari.
+ */
+export async function clearAllSeedData(
+  database: SchedovynDatabase = defaultDb
+): Promise<HydratedWorkspaceBundle> {
+  return database.transaction(
+    "rw",
+    [
+      database.workspaces,
+      database.dayConfigs,
+      database.classes,
+      database.subjects,
+      database.teachers,
+      database.rooms,
+      database.requirements,
+      database.sessions,
+    ],
+    async () => {
+      const existingWorkspaces = await database.workspaces.toArray()
+      let workspace: Workspace
+      let dayConfigs: DayScheduleConfig[]
+
+      if (existingWorkspaces.length > 0) {
+        workspace = {
+          ...existingWorkspaces[0],
+          activeClassId: null,
+          updatedAt: new Date().toISOString(),
+        }
+        await database.workspaces.put(workspace)
+        dayConfigs = await database.dayConfigs
+          .where("workspaceId")
+          .equals(workspace.id)
+          .toArray()
+      } else {
+        const seed = createDefaultWorkspaceSeed()
+        workspace = {
+          ...seed.workspace,
+          activeClassId: null,
+          updatedAt: new Date().toISOString(),
+        }
+        await database.workspaces.put(workspace)
+        await database.dayConfigs.bulkPut(seed.dayConfigs)
+        dayConfigs = seed.dayConfigs
+      }
+
+      await Promise.all([
+        database.classes.clear(),
+        database.subjects.clear(),
+        database.teachers.clear(),
+        database.rooms.clear(),
+        database.requirements.clear(),
+        database.sessions.clear(),
+      ])
+
+      return {
+        workspace,
+        dayConfigs: sortDayConfigs(dayConfigs),
+        classes: [],
+        subjects: [],
+        teachers: [],
+        rooms: [],
+        requirements: [],
+        sessions: [],
+      }
+    }
+  )
+}

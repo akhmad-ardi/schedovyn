@@ -139,7 +139,7 @@ export function CopyScheduleDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto p-6">
+      <DialogContent className="max-h-[90vh] max-w-xl! overflow-y-auto p-6">
         <DialogHeader>
           <div className="flex items-center gap-2">
             <CopyIcon className="size-5 text-primary" />
@@ -167,20 +167,20 @@ export function CopyScheduleDialog({
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <div className="border border-border bg-card p-3 text-center">
                 <span className="text-[11px] text-muted-foreground">Sesi Disalin</span>
-                <p className="font-heading text-lg font-bold font-mono tabular-nums text-foreground">
+                <p className="font-heading text-lg font-bold tabular-nums text-foreground">
                   {outcome.copiedCount}
                 </p>
               </div>
               <div className="border border-border bg-card p-3 text-center">
                 <span className="text-[11px] text-muted-foreground">Sesi Lama Dihapus</span>
-                <p className="font-heading text-lg font-bold font-mono tabular-nums text-muted-foreground">
+                <p className="font-heading text-lg font-bold tabular-nums text-muted-foreground">
                   {outcome.replacedCount}
                 </p>
               </div>
               <div className="col-span-2 sm:col-span-1 border border-border bg-card p-3 text-center">
                 <span className="text-[11px] text-muted-foreground">Konflik Baru</span>
                 <p
-                  className={`font-heading text-lg font-bold font-mono tabular-nums ${
+                  className={`font-heading text-lg font-bold tabular-nums ${
                     outcome.newConflictsCount > 0
                       ? "text-destructive"
                       : "text-emerald-600 dark:text-emerald-400"

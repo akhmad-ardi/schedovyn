@@ -67,7 +67,7 @@ export function TimetableGrid({ sessions }: TimetableGridProps) {
           {activeDays.map((day) => (
             <div
               key={day.dayOfWeek}
-              className="flex min-w-[140px] flex-1 flex-col items-center justify-center border-r border-border px-2 py-2 text-center last:border-r-0"
+              className="flex min-w-35 flex-1 flex-col items-center justify-center border-r border-border px-2 py-2 text-center last:border-r-0"
             >
               <span className="font-heading text-xs font-semibold text-foreground">
                 {DAY_OF_WEEK_LABELS[day.dayOfWeek]}
@@ -91,7 +91,7 @@ export function TimetableGrid({ sessions }: TimetableGridProps) {
             <div
               key={marker.timeStr}
               style={{ top: `${marker.topPx}px` }}
-              className="absolute -mt-2.5 inset-x-0 pr-2 text-right text-[10px] tabular-nums text-muted-foreground"
+              className="absolute inset-x-0 pr-2 text-right text-[10px] tabular-nums text-muted-foreground"
             >
               {marker.timeStr}
             </div>

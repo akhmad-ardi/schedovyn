@@ -62,7 +62,7 @@ export function TimetableDayColumn({
     <div
       ref={ref}
       style={{ height: `${boundaries.totalHeightPx}px` }}
-      className={`relative min-w-[140px] flex-1 border-r border-border transition-colors ${
+      className={`relative min-w-35 flex-1 border-r border-border transition-colors ${
         isDropTarget ? "bg-primary/5 ring-2 ring-primary/40 ring-inset" : "bg-card/40"
       }`}
     >

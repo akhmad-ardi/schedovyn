@@ -103,7 +103,7 @@ export function ConflictListPanel({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col gap-0 p-0 overflow-hidden">
+      <DialogContent className="flex max-h-[90vh] max-w-4xl! flex-col gap-0 p-0 overflow-hidden">
         {/* Header Dialog */}
         <DialogHeader className="border-b border-border p-4">
           <DialogTitle>Ringkasan Validasi: Daftar Konflik dan Peringatan</DialogTitle>

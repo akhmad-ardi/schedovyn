@@ -246,6 +246,8 @@ export interface WorkspaceStoreState {
   copyClassSchedule: (
     options: CopyScheduleOptions
   ) => Promise<CopyScheduleOutcome>
+  applyFullDefaultSeed: () => Promise<boolean>
+  clearAllSeedData: () => Promise<boolean>
 }
 
 export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
@@ -339,9 +341,10 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           }
         })
       }
-      return true
+        return true
     } catch (error) {
       if (currentSequence === mutationSequence) {
+        console.error("STORE CATCH:", error);
         const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
@@ -420,6 +423,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           bootError: null,
         })
       } catch (error) {
+        console.error("DEBUG APPLY SEED ERROR:", error)
         const errorInfo = diagnoseStorageError(error)
         set({
           isHydrated: true,
@@ -730,6 +734,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         })
         return true
       } catch (error) {
+        console.error("DEBUG APPLY SEED ERROR:", error)
         const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
@@ -1039,6 +1044,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         })
         return true
       } catch (error) {
+        console.error("APPLY SEED CAUGHT:", error)
         const errorInfo = diagnoseStorageError(error)
         set({
           saveStatus: "error",
@@ -2079,6 +2085,106 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           unmatchedSubjectIds: cloneResult.unmatchedSubjectIds,
           error: errorInfo.message,
         }
+      }
+    },
+
+        applyFullDefaultSeed: async () => {
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
+      try {
+        const bundle = await workspaceRepo.applyFullDefaultSeed()
+        const validationReport = runValidation({
+          workspace: bundle.workspace,
+          dayConfigs: bundle.dayConfigs,
+          classes: bundle.classes,
+          teachers: bundle.teachers,
+          rooms: bundle.rooms,
+          subjects: bundle.subjects,
+          requirements: bundle.requirements,
+          sessions: bundle.sessions,
+        })
+        const configValidation = validateWorkspaceConfig(
+          bundle.workspace,
+          bundle.dayConfigs
+        )
+
+        set({
+          workspace: bundle.workspace,
+          dayConfigs: bundle.dayConfigs,
+          classes: bundle.classes,
+          teachers: bundle.teachers,
+          rooms: bundle.rooms,
+          subjects: bundle.subjects,
+          requirements: bundle.requirements,
+          sessions: bundle.sessions,
+          selectedSessionId: null,
+          historyPast: [],
+          historyFuture: [],
+          configValidation,
+          validationReport,
+          saveStatus: "saved",
+          lastSavedAt: bundle.workspace.updatedAt,
+          saveErrorMessage: null,
+          saveErrorInfo: null,
+        })
+        return true
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
+        set({
+          saveStatus: "error",
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
+        })
+        return false
+      }
+    },
+
+    clearAllSeedData: async () => {
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
+      try {
+        const bundle = await workspaceRepo.clearAllSeedData()
+        const validationReport = runValidation({
+          workspace: bundle.workspace,
+          dayConfigs: bundle.dayConfigs,
+          classes: [],
+          teachers: [],
+          rooms: [],
+          subjects: [],
+          requirements: [],
+          sessions: [],
+        })
+        const configValidation = validateWorkspaceConfig(
+          bundle.workspace,
+          bundle.dayConfigs
+        )
+
+        set({
+          workspace: bundle.workspace,
+          dayConfigs: bundle.dayConfigs,
+          classes: [],
+          teachers: [],
+          rooms: [],
+          subjects: [],
+          requirements: [],
+          sessions: [],
+          selectedSessionId: null,
+          historyPast: [],
+          historyFuture: [],
+          configValidation,
+          validationReport,
+          saveStatus: "saved",
+          lastSavedAt: bundle.workspace.updatedAt,
+          saveErrorMessage: null,
+          saveErrorInfo: null,
+        })
+        return true
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
+        set({
+          saveStatus: "error",
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
+        })
+        return false
       }
     },
   }

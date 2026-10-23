@@ -100,4 +100,61 @@ describe("FR-01: Halaman Pengaturan Ruang Kerja & Jam Belajar (SettingsPage)", (
       expect(screen.getByRole("alert")).toBeInTheDocument()
     })
   })
+
+  it("dapat memuat seed contoh lengkap dan menghapus semua seed melalui kartu Pengelolaan Data", async () => {
+    const user = userEvent.setup()
+    renderSettingsWithShell()
+
+    await screen.findByDisplayValue("SMP Negeri 1 Nusantara")
+
+    // 1. Verifikasi kehadiran kartu Pengelolaan Data & Seed Contoh
+    expect(
+      screen.getByText(/Pengelolaan Data & Seed Contoh/i)
+    ).toBeInTheDocument()
+
+    // 2. Klik tombol Muat Ulang Seed Lengkap
+    const loadSeedButton = screen.getByRole("button", {
+      name: /Muat Ulang Seed Lengkap/i,
+    })
+    await user.click(loadSeedButton)
+
+    // Konfirmasi modal AlertDialog
+    const confirmSeedAction = await screen.findByRole("button", {
+      name: /Muat Ulang Data Contoh/i,
+    })
+    await user.click(confirmSeedAction)
+
+    await waitFor(() => {
+      const state = useWorkspaceStore.getState()
+      expect(state.classes.length).toBe(6)
+      expect(state.teachers.length).toBe(10)
+      expect(state.subjects.length).toBe(10)
+      expect(state.rooms.length).toBe(10)
+      expect(state.sessions.length).toBeGreaterThan(15)
+      expect(state.workspace?.activeClassId).toBe("seed-cls-7a")
+    })
+
+    // 3. Klik tombol Hapus Semua Seed / Data
+    const clearButton = screen.getByRole("button", {
+      name: /Hapus Semua Seed \/ Data/i,
+    })
+    await user.click(clearButton)
+
+    // Konfirmasi modal AlertDialog
+    const confirmClearAction = await screen.findByRole("button", {
+      name: /Hapus Semua Data/i,
+    })
+    await user.click(confirmClearAction)
+
+    await waitFor(() => {
+      const state = useWorkspaceStore.getState()
+      expect(state.classes).toHaveLength(0)
+      expect(state.teachers).toHaveLength(0)
+      expect(state.subjects).toHaveLength(0)
+      expect(state.rooms).toHaveLength(0)
+      expect(state.requirements).toHaveLength(0)
+      expect(state.sessions).toHaveLength(0)
+      expect(state.workspace?.activeClassId).toBeNull()
+    })
+  })
 })
