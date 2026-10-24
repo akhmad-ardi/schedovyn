@@ -8,6 +8,10 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": resolve(import.meta.dirname, "./src"),
+      "virtual:pwa-register/react": resolve(
+        import.meta.dirname,
+        "./src/lib/pwa-register.ts"
+      ),
     },
   },
   test: {

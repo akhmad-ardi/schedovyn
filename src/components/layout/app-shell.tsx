@@ -20,6 +20,9 @@ import {
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { SaveStatusBadge } from "@/components/layout/save-status-badge"
+import { PwaInstallButton } from "@/components/pwa/pwa-install-button"
+import { PwaReloadPrompt } from "@/components/pwa/pwa-reload-prompt"
+import { usePwa } from "@/hooks/use-pwa"
 import { useWorkspaceStore } from "@/store/use-workspace-store"
 
 interface AppShellProps {
@@ -55,6 +58,8 @@ export function AppShell({ children }: AppShellProps) {
   const retryPendingStorageSync = useWorkspaceStore(
     (state) => state.retryPendingStorageSync
   )
+
+  const pwa = usePwa()
 
   const [themeControl, setThemeControl] = React.useState<{
     theme: "dark" | "light" | "system"
@@ -159,6 +164,11 @@ export function AppShell({ children }: AppShellProps) {
           </nav>
 
           <div className="flex items-center gap-2">
+            <PwaInstallButton
+              isInstallable={pwa.isInstallable}
+              isInstalled={pwa.isInstalled}
+              onInstall={pwa.promptInstall}
+            />
             <SaveStatusBadge />
             <ThemeToggleButton
               themeControl={themeControl}
@@ -201,6 +211,13 @@ export function AppShell({ children }: AppShellProps) {
           children ?? <Outlet />
         )}
       </main>
+
+      <PwaReloadPrompt
+        needRefresh={pwa.needRefresh}
+        offlineReady={pwa.offlineReady}
+        onReload={pwa.reloadApp}
+        onDismiss={pwa.dismissPrompt}
+      />
     </div>
   )
 }
