@@ -5,6 +5,7 @@ import {
   type DayOfWeek,
   type DayScheduleConfig,
   type Room,
+  type SnapIntervalMinutes,
   type Subject,
   type Teacher,
   type TeachingRequirement,
@@ -28,17 +29,26 @@ export interface DefaultWorkspaceSeedData {
  * Seluruh 8 entitas didefinisikan dengan tipe TypeScript ketat sesuai antarmuka entitas domain:
  * Workspace, DayConfigs, Classes, Subjects, Teachers, Rooms, Requirements, dan Sessions.
  */
-export function createDefaultWorkspaceSeed(): DefaultWorkspaceSeedData {
+export interface CreateDefaultWorkspaceSeedOptions {
+  workspaceId?: string
+  name?: string
+  academicPeriod?: string
+  defaultSnapIntervalMinutes?: SnapIntervalMinutes
+}
+
+export function createDefaultWorkspaceSeed(
+  options?: CreateDefaultWorkspaceSeedOptions
+): DefaultWorkspaceSeedData {
   const nowIso = new Date().toISOString()
   const workspaceId = "ws-smpn1-nusantara"
 
   // 1. Workspace
   const workspace: Workspace = {
     id: workspaceId,
-    name: "SMP Negeri 1 Nusantara",
-    academicPeriod: "Semester Ganjil 2026/2027",
+    name: options?.name?.trim() || "SMP Negeri 1 Nusantara",
+    academicPeriod: options?.academicPeriod?.trim() || "Semester Ganjil 2026/2027",
     activeClassId: null,
-    defaultSnapIntervalMinutes: 15,
+    defaultSnapIntervalMinutes: options?.defaultSnapIntervalMinutes ?? 15,
     createdAt: nowIso,
     updatedAt: nowIso,
   }
@@ -888,6 +898,84 @@ export function createDefaultWorkspaceSeed(): DefaultWorkspaceSeedData {
     ...ses,
     endTime: addMinutesToTime(ses.startTime, ses.durationMinutes),
   }))
+
+  if (options?.workspaceId && options.workspaceId !== "ws-smpn1-nusantara") {
+    const customWsId = options.workspaceId
+    const customWorkspace: Workspace = {
+      ...workspace,
+      id: customWsId,
+      name: options.name?.trim() || workspace.name,
+      academicPeriod: options.academicPeriod?.trim() || workspace.academicPeriod,
+      defaultSnapIntervalMinutes:
+        options.defaultSnapIntervalMinutes ?? workspace.defaultSnapIntervalMinutes,
+    }
+
+    return {
+      workspace: customWorkspace,
+      dayConfigs: dayConfigs.map((d) => ({
+        ...d,
+        id: `${customWsId}::${d.id}`,
+        workspaceId: customWsId,
+        breakIntervals: d.breakIntervals.map((b) => ({
+          ...b,
+          id: `${customWsId}::${b.id}`,
+        })),
+      })),
+      classes: classes.map((c) => ({
+        ...c,
+        id: `${customWsId}::${c.id}`,
+        workspaceId: customWsId,
+      })),
+      subjects: subjects.map((s) => ({
+        ...s,
+        id: `${customWsId}::${s.id}`,
+        workspaceId: customWsId,
+      })),
+      teachers: teachers.map((t) => ({
+        ...t,
+        id: `${customWsId}::${t.id}`,
+        workspaceId: customWsId,
+        unavailableIntervals: t.unavailableIntervals.map((i) => ({
+          ...i,
+          id: `${customWsId}::${i.id}`,
+        })),
+      })),
+      rooms: rooms.map((r) => ({
+        ...r,
+        id: `${customWsId}::${r.id}`,
+        workspaceId: customWsId,
+        unavailableIntervals: r.unavailableIntervals.map((i) => ({
+          ...i,
+          id: `${customWsId}::${i.id}`,
+        })),
+      })),
+      requirements: requirements.map((req) => ({
+        ...req,
+        id: `${customWsId}::${req.id}`,
+        workspaceId: customWsId,
+        classId: `${customWsId}::${req.classId}`,
+        subjectId: `${customWsId}::${req.subjectId}`,
+        defaultTeacherId: req.defaultTeacherId
+          ? `${customWsId}::${req.defaultTeacherId}`
+          : null,
+        defaultRoomId: req.defaultRoomId
+          ? `${customWsId}::${req.defaultRoomId}`
+          : null,
+      })),
+      sessions: sessions.map((sess) => ({
+        ...sess,
+        id: `${customWsId}::${sess.id}`,
+        workspaceId: customWsId,
+        requirementId: sess.requirementId
+          ? `${customWsId}::${sess.requirementId}`
+          : null,
+        classId: `${customWsId}::${sess.classId}`,
+        subjectId: `${customWsId}::${sess.subjectId}`,
+        teacherId: sess.teacherId ? `${customWsId}::${sess.teacherId}` : null,
+        roomId: sess.roomId ? `${customWsId}::${sess.roomId}` : null,
+      })),
+    }
+  }
 
   return {
     workspace,

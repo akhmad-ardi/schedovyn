@@ -1,8 +1,8 @@
 # Technical Design Document (TDD) - Schedovyn
 
-**Versi Dokumen:** 1.0.0  
-**Status:** Draft  
-**Referensi Utama:** `docs/Schedovyn-PRD.md` (v1.0.0)  
+**Versi Dokumen:** 1.1.0  
+**Status:** Active  
+**Referensi Utama:** `docs/Schedovyn-PRD.md` (v1.1.0)  
 **Target Arsitektur:** Client-Side Single Page Application (Local-First Web App)  
 **Platform Target:** Browser Desktop Modern (Chromium, Firefox, Safari)
 
@@ -16,9 +16,9 @@ Schedovyn adalah aplikasi web penyusunan jadwal pembelajaran berbasis *Smart Tim
 
 1. **Zero-Backend & Local-First:** Seluruh *state* persisten disimpan di **IndexedDB** pada *browser* pengguna. Tidak ada pemanggilan API jaringan untuk penyimpanan maupun pemrosesan ekspor.
 2. **Strict Separation of Concerns (NFR-05):**
-   - **Domain Layer (`src/domain/`)** berisi tipe data murni, kalkulasi interval waktu, *conflict detection engine*, dan validator kelengkapan jadwal. Modul ini bebas dari ketergantungan React, DOM, maupun IndexedDB sehingga dapat diuji secara terisolasi melalui *unit test*.
+   - **Domain Layer (`src/domain/`)** berisi tipe data murni, kalkulasi interval waktu, *conflict detection engine*, validator kelengkapan jadwal, dan logika kloning multi-ruang kerja. Modul ini bebas dari ketergantungan React, DOM, maupun IndexedDB sehingga dapat diuji secara terisolasi melalui *unit test*.
    - **Persistence Layer (`src/db/`)** mengenkapsulasi skema dan transaksi IndexedDB menggunakan Dexie.js.
-   - **Application State Layer (`src/store/`)** mengelola *state* aktif di memori, antrean *undo/redo*, pemicu perhitungan ulang konflik, dan sinkronisasi *auto-save* ke IndexedDB.
+   - **Application State Layer (`src/store/`)** mengelola *state* aktif di memori, daftar ruang kerja lokal, antrean *undo/redo*, pemicu perhitungan ulang konflik, dan sinkronisasi *auto-save* ke IndexedDB.
    - **Export Service Layer (`src/services/export/`)** mengubah *snapshot* data jadwal dan laporan konflik menjadi berkas `.pdf` dan `.xlsx` di memori klien.
    - **Presentation Layer (`src/components/`, `src/pages/`)** merender antarmuka pengguna berbasis React 19, Tailwind CSS v4, shadcn/ui, dan `@dnd-kit/react`.
 3. **Representasi Waktu Numerik untuk Komputasi Cepat:** Format waktu tampilan dan penyimpanan menggunakan string 24 jam (`"HH:mm"`), namun selama proses validasi dan *drag-and-drop*, waktu dikonversi ke bilangan bulat menit sejak tengah malam (`0` hingga `1440`) agar perbandingan interval bebas dari kesalahan *floating-point* maupun *timezone parsing*.
@@ -29,7 +29,7 @@ Schedovyn adalah aplikasi web penyusunan jadwal pembelajaran berbasis *Smart Tim
 ```mermaid
 flowchart TB
     subgraph UI["Presentation Layer (React 19 + Tailwind v4 + shadcn/ui)"]
-        WS["Pengaturan Ruang Kerja & Jam Belajar"]
+        WS["Pengaturan Ruang Kerja & Multi-Workspace"]
         MD["Pengelolaan Data Master"]
         ED["Editor Jadwal (dnd-kit Grid + Unscheduled Pool)"]
         CP["Panel Detail Sesi & Daftar Konflik"]
@@ -37,7 +37,7 @@ flowchart TB
     end
 
     subgraph Store["Application State Layer (Zustand / Store)"]
-        AS["Workspace & Master Data State"]
+        AS["Workspaces List, Active Workspace & Master Data State"]
         SS["Timetable Sessions State"]
         UR["Undo / Redo History Stack"]
         VS["Derived Validation & Conflict State"]
@@ -48,6 +48,7 @@ flowchart TB
         TM["Time & Interval Math Utils"]
         CE["Smart Conflict Engine (Cross-Class)"]
         CV["Schedule Completeness Validator"]
+        WC["Workspace Cloner & Entity Remapper"]
     end
 
     subgraph Services["Client Services Layer"]
@@ -62,11 +63,12 @@ flowchart TB
     AS -->|Evaluate on Change| CE
     AS -->|Evaluate Requirements| CV
     SS -->|Evaluate Requirements| CV
+    AS -->|Duplicate Workspace| WC
     CE --> TM
     CE -->|Conflict List| VS
     CV -->|Completeness Warnings & Status| VS
     Store -->|Atomic Write Transaction| DB
-    DB -->|Hydrate on App Boot| Store
+    DB -->|Hydrate on App Boot / Switch| Store
     EX -->|Trigger Export with Current Snapshot| PDF
     EX -->|Trigger Export with Current Snapshot| XLS
 ```
@@ -87,11 +89,11 @@ Berdasarkan fondasi repositori saat ini (`package.json`) dan kebutuhan PRD Bagia
 | **Styling & UI** | `tailwindcss` (`^4`), `shadcn` (`radix-lyra`), `lucide-react` | Terpasang | Sistem desain utilitas, aksesibilitas komponen dialog/select/table |
 | **Drag & Drop** | `@dnd-kit/react` (`^0.5.1`) | Terpasang | Interaksi tarik-lepas kartu sesi ke grid waktu |
 | **Data Table** | `@tanstack/react-table` (`^9.3.1`) | Terpasang | Tabel pengelolaan data master dan rekapitulasi |
-| **State Management** | `zustand` (`^5.x`) | Perlu ditambah | Pengelolaan *state* lintas komponen dan *middleware* *undo/redo* |
-| **Local Database** | `dexie` (`^4.x`), `dexie-react-hooks` | Perlu ditambah | Abstraksi IndexedDB dengan dukungan transaksi dan *indexing* |
-| **PDF Export** | `jspdf` (`^2.5.x` / `^3.x`), `jspdf-autotable` | Perlu ditambah | Pembuatan dokumen PDF *landscape* siap cetak di *browser* |
-| **Excel Export** | `xlsx` (SheetJS CE) | Perlu ditambah | Pembuatan *workbook* `.xlsx` multi-*worksheet* di *browser* |
-| **Testing** | `vitest`, `@testing-library/react`, `fake-indexeddb` | Perlu ditambah | Pengujian unit *conflict engine*, penyimpanan lokal, dan komponen |
+| **State Management** | `zustand` (`^5.x`) | Terpasang | Pengelolaan *state* lintas komponen dan *middleware* *undo/redo* |
+| **Local Database** | `dexie` (`^4.x`), `dexie-react-hooks` | Terpasang | Abstraksi IndexedDB dengan dukungan transaksi dan *indexing* |
+| **PDF Export** | `jspdf` (`^2.5.x` / `^3.x`), `jspdf-autotable` | Terpasang | Pembuatan dokumen PDF *landscape* siap cetak di *browser* |
+| **Excel Export** | `xlsx` (SheetJS CE) | Terpasang | Pembuatan *workbook* `.xlsx` multi-*worksheet* di *browser* |
+| **Testing** | `vitest`, `@testing-library/react`, `fake-indexeddb` | Terpasang | Pengujian unit *conflict engine*, penyimpanan lokal, dan komponen |
 
 ---
 
@@ -103,22 +105,26 @@ Struktur direktori di bawah `src/` dirancang untuk memisahkan logika bisnis murn
 src/
 ├── domain/                         # Pure TypeScript (tanpa dependensi React/DOM)
 │   ├── types/
-│   │   ├── entities.ts             # Definisi tipe data utama (Workspace, Session, dll.)
+│   │   ├── entities.ts             # Definisi tipe data utama (Workspace, Session, Multi-Workspace, dll.)
 │   │   ├── validation.ts           # Definisi tipe Conflict, CompletenessWarning, ValidationSummary
 │   │   └── export.ts               # Kontrak parameter dan opsi ekspor
 │   ├── time/
 │   │   ├── time-utils.ts           # Konversi "HH:mm" <-> menit, kalkulasi durasi, snap grid
 │   │   └── interval-utils.ts       # Fungsi irisan interval (startA < endB && startB < endA)
+│   ├── timetable/
+│   │   └── schedule-copier.ts      # Fungsi murni penyalinan jadwal antar-kelas (FR-12)
+│   ├── workspace/
+│   │   └── workspace-cloner.ts     # Fungsi murni duplikasi ruang kerja & pemetaan ulang ID (FR-13)
 │   └── validation/
 │       ├── conflict-engine.ts      # Deteksi konflik kelas, guru, ruangan, jam belajar, ketersediaan
 │       ├── completeness-engine.ts  # Evaluasi pemenuhan TeachingRequirement & kelengkapan atribut
 │       └── workspace-validator.ts  # Orkestrator status validasi kelas aktif & ruang kerja (FR-11)
 ├── db/                             # Persistence Layer (IndexedDB via Dexie)
 │   ├── database.ts                 # Deklarasi skema tabel dan indeks Dexie
-│   ├── workspace-repository.ts     # Operasi baca/tulis transaksional ke IndexedDB
-│   └── seed-default.ts             # Inisialisasi ruang kerja awal ketika aplikasi pertama dibuka
+│   ├── workspace-repository.ts     # Operasi baca/tulis transaksional multi-workspace ke IndexedDB
+│   └── seed-default.ts             # Inisialisasi ruang kerja awal & seed dengan namespace ID unik
 ├── store/                          # Application State Layer
-│   ├── use-workspace-store.ts      # Store utama (data master, kelas aktif, sesi, hasil validasi)
+│   ├── use-workspace-store.ts      # Store utama (daftar workspace, data master, kelas aktif, sesi, validasi)
 │   ├── history-manager.ts          # Stack Undo/Redo untuk mutasi sesi jadwal (FR-07)
 │   └── storage-sync.ts             # Pengelola auto-save, status penyimpanan, dan error handling (FR-10)
 ├── services/
@@ -128,8 +134,8 @@ src/
 │       └── excel-exporter.ts       # Generator berkas .xlsx client-side + formula sanitization (FR-09)
 ├── components/
 │   ├── ui/                         # Komponen dasar shadcn/ui
-│   ├── layout/                     # AppShell, TopHeader, ClassSelectorBar, SaveStatusBadge
-│   ├── workspace/                  # Form konfigurasi ruang kerja, jam operasional, dan jam istirahat
+│   ├── layout/                     # AppShell, WorkspaceSwitcher, ClassSelectorBar, SaveStatusBadge
+│   ├── workspace/                  # Form konfigurasi ruang kerja, jam operasional, dan WorkspaceManagementCard
 │   ├── master-data/                # Tabel & dialog CRUD: Kelas, Guru, Mapel, Ruangan, Kebutuhan
 │   ├── timetable/                  # TimetableGrid, DayColumn, SessionBlock, UnscheduledPanel, SessionDetailPanel
 │   ├── conflicts/                  # ConflictListDrawer, ValidationSummaryBanner, ConflictBadge
@@ -137,16 +143,19 @@ src/
 ├── pages/
 │   ├── editor-page.tsx             # Halaman utama penyusunan jadwal (FR-03, FR-04, FR-05, FR-06)
 │   ├── master-data-page.tsx        # Halaman pengelolaan data master (FR-02)
-│   └── settings-page.tsx           # Halaman pengaturan ruang kerja & jam belajar (FR-01)
+│   └── settings-page.tsx           # Halaman pengaturan ruang kerja, multi-workspace, & jam belajar (FR-01, FR-13)
 ├── route/
 │   └── index.tsx                   # Konfigurasi React Router
 └── __tests__/                      # Unit & integration tests
     ├── domain/
     │   ├── interval-utils.spec.ts
     │   ├── conflict-engine.spec.ts
-    │   └── completeness-engine.spec.ts
+    │   ├── completeness-engine.spec.ts
+    │   └── workspace-cloner.spec.ts
     ├── db/
     │   └── workspace-repository.spec.ts
+    ├── integration/
+    │   └── multi-workspace.spec.ts
     └── export/
         └── excel-exporter.spec.ts
 ```
@@ -193,6 +202,21 @@ export type SubjectColorKey =
   | "indigo"
   | "slate";
 
+/**
+ * Mode inisialisasi saat membuat ruang kerja baru (FR-13).
+ * - BLANK: Hanya membuat Workspace + 7 DayScheduleConfig bawaan (Senin-Jumat aktif, Sabtu-Minggu nonaktif).
+ * - SEED_DEFAULT: Mengisi Workspace baru dengan data contoh SMP Negeri 1 Nusantara menggunakan ID unik.
+ */
+export type WorkspaceInitMode = "BLANK" | "SEED_DEFAULT";
+
+/**
+ * Mode penyalinan saat menduplikasi ruang kerja yang sudah ada (FR-13).
+ * - MASTER_DATA_ONLY: Menyalin konfigurasi hari, kelas, guru, mata pelajaran, ruangan, dan kebutuhan pembelajaran
+ *   tanpa menyalin penempatan sesi jadwal (sessions = []), sehingga siap dijadwalkan ulang untuk semester baru.
+ * - FULL_COPY: Menyalin seluruh konfigurasi, data master, kebutuhan pembelajaran, beserta posisi sesi terjadwal.
+ */
+export type WorkspaceDuplicateMode = "MASTER_DATA_ONLY" | "FULL_COPY";
+
 export interface TimeInterval {
   id: string;
   dayOfWeek: DayOfWeek;
@@ -227,6 +251,20 @@ export interface Workspace {
   defaultSnapIntervalMinutes: SnapIntervalMinutes;
   createdAt: string;        // ISO-8601 timestamp
   updatedAt: string;        // ISO-8601 timestamp
+}
+
+export interface CreateWorkspaceInput {
+  name: string;
+  academicPeriod: string;
+  defaultSnapIntervalMinutes: SnapIntervalMinutes;
+  initMode: WorkspaceInitMode;
+}
+
+export interface DuplicateWorkspaceInput {
+  sourceWorkspaceId: string;
+  name: string;
+  academicPeriod: string;
+  mode: WorkspaceDuplicateMode;
 }
 
 export interface ClassGroup {
@@ -379,6 +417,25 @@ Karena IndexedDB tidak memiliki *foreign key cascade* bawaan, penghapusan data m
 - **Menghapus Mata Pelajaran (`Subject`):** Ditolak dengan pesan konfirmasi apabila masih digunakan oleh `TeachingRequirement` atau `TimetableSession`, kecuali pengguna memilih opsi hapus beserta kebutuhan dan sesi terkait.
 - **Menghapus Guru (`Teacher`):** Mengubah `defaultTeacherId` pada `TeachingRequirement` menjadi `null` dan `teacherId` pada `TimetableSession` menjadi `null` (yang kemudian akan memicu peringatan kelengkapan `MISSING_TEACHER`).
 - **Menghapus Ruangan (`Room`):** Mengubah `defaultRoomId` pada `TeachingRequirement` menjadi `null` dan `roomId` pada `TimetableSession` menjadi `null` (memicu peringatan `MISSING_REQUIRED_ROOM` jika `roomRequired === true`).
+
+### 4.6 Arsitektur Multi-Ruang Kerja & Isolasi Transaksi IndexedDB (FR-13)
+
+Untuk mendukung banyak ruang kerja (*multi-workspace*) secara aman di atas skema IndexedDB versi 1:
+
+1. **Kloning Entitas Murni (`src/domain/workspace/workspace-cloner.ts`):**
+   - Fungsi murni `cloneWorkspaceSnapshot()` menerima snapshot ruang kerja sumber dan `DuplicateWorkspaceInput`.
+   - Menghasilkan `workspaceId` baru serta membangun peta translasi ID lama $\rightarrow$ ID baru (`Map<string, string>`) untuk `classId`, `teacherId`, `subjectId`, `roomId`, dan `requirementId`.
+   - Memetakan `workspace.activeClassId` ke ID kelas baru yang berkorespondensi.
+   - Menyalin seluruh `dayConfigs`, `classes`, `teachers`, `subjects`, `rooms`, dan `requirements` dengan `workspaceId` baru dan referensi foreign key (`defaultTeacherId`, `defaultRoomId`) yang telah ditranslasi.
+   - Jika `mode === "MASTER_DATA_ONLY"`, mengembalikan `sessions: []` (sehingga seluruh kebutuhan pembelajaran otomatis berstatus belum terjadwal di semester baru).
+   - Jika `mode === "FULL_COPY"`, menyalin seluruh `sessions` dengan ID baru dan memetakan `classId`, `subjectId`, `teacherId`, `roomId`, serta `requirementId` ke ID baru.
+2. **Isolasi Transaksi per `workspaceId` di `src/db/workspace-repository.ts`:**
+   - Pembuatan data contoh (`createDefaultWorkspaceSeed(customWorkspaceId?)`) wajib menghasilkan ID entitas anak yang unik per ruang kerja apabila `customWorkspaceId` bukan `"ws-smpn1-nusantara"`, mencegah *Primary Key Collision* di IndexedDB.
+   - Operasi `applyFullDefaultSeed` dan `clearAllSeedData` wajib memfilter penghapusan menggunakan `.where("workspaceId").equals(targetWorkspaceId).delete()`, **bukan** `.clear()` pada tabel global, agar ruang kerja lain di IndexedDB tidak ikut terhapus.
+   - Penghapusan ruang kerja (`deleteWorkspaceById(workspaceId)`) menolak penghapusan jika jumlah total ruang kerja di tabel `workspaces` $\le 1$, dan menghapus seluruh rekaman anak secara kaskade dalam satu transaksi `rw`.
+3. **Preferensi Ruang Kerja Aktif & Reset Riwayat:**
+   - ID ruang kerja aktif terakhir disimpan di `localStorage` dengan kunci `"schedovyn_active_workspace_id"`.
+   - Saat berpindah ruang kerja (`switchWorkspace(workspaceId)`), tumpukan `history` (*Undo/Redo*) dan `selectedSessionId` di `useWorkspaceStore` wajib direset menjadi kosong agar mutasi dari ruang kerja sebelumnya tidak bocor ke ruang kerja baru.
 
 ---
 
@@ -780,13 +837,13 @@ Aplikasi menggunakan satu `AppShell` dengan navigasi utama di bagian atas agar r
 |---|---|---|
 | `/` | `EditorPage` | Antarmuka utama: pemilih kelas aktif, panel sesi belum terjadwal, grid jadwal drag-and-drop, panel detail & konflik |
 | `/master-data` | `MasterDataPage` | Pengelolaan tab Kelas, Guru, Mata Pelajaran, Ruangan, dan Kebutuhan Pembelajaran |
-| `/settings` | `SettingsPage` | Pengaturan identitas ruang kerja, hari sekolah, jam operasional per hari, snap interval, dan jam istirahat |
+| `/settings` | `SettingsPage` | Pengaturan identitas ruang kerja, pengelolaan multi-workspace, hari sekolah, jam operasional per hari, snap interval, dan jam istirahat |
 
 ### 9.2 Wireframe Tata Letak Editor Jadwal
 
 ```text
 +----------------------------------------------------------------------------------------------------------+
-| [Schedovyn] SMPN 1 Nusantara (Ganjil 26/27)  |  [Jadwal] [Data Master] [Pengaturan]  | [Tersimpan] [Tema] |
+| [Schedovyn] [SMPN 1 Nusantara (Ganjil 26/27) v] | [Jadwal] [Data Master] [Pengaturan] | [Tersimpan] [Tema] |
 +----------------------------------------------------------------------------------------------------------+
 | Kelas Aktif: [ VII-A v ]  | Status: [!] 1 Konflik, 2 Sesi Belum Terjadwal | [Undo] [Redo] [Salin] [Ekspor]|
 +---------------------------+-----------------------------------------------+------------------------------+
@@ -815,7 +872,7 @@ Aplikasi menggunakan satu `AppShell` dengan navigasi utama di bagian atas agar r
 
 ## 10. Strategi Pengujian dan Pemetaan Acceptance Criteria
 
-Seluruh persyaratan pada Bagian 10 (NFR) dan Bagian 12 (Acceptance Criteria AC-01 s.d. AC-13) di PRD dipetakan langsung ke dalam *automated test suite* menggunakan **Vitest**:
+Seluruh persyaratan pada Bagian 10 (NFR) dan Bagian 12 (Acceptance Criteria AC-01 s.d. AC-14) di PRD dipetakan langsung ke dalam *automated test suite* menggunakan **Vitest**:
 
 | Kode AC / NFR | Skenario Pengujian | Jenis Test & Lokasi Berkas | Asersi Utama |
 |---|---|---|---|
@@ -832,13 +889,14 @@ Seluruh persyaratan pada Bagian 10 (NFR) dan Bagian 12 (Acceptance Criteria AC-0
 | **AC-11** | Ekspor saat jadwal masih memiliki konflik menyertakan peringatan dan data konflik | Unit Test (`services/export/excel-exporter.spec.ts` & `pdf-exporter.spec.ts`) | Sheet `Konflik` dan teks peringatan PDF terisi sesuai daftar konflik aktif |
 | **AC-12** | Perubahan jadwal tersimpan di IndexedDB dan dipulihkan saat *store* diinisialisasi ulang | Integration Test (`db/workspace-repository.spec.ts` dengan `fake-indexeddb`) | `hydrateWorkspace()` mengembalikan seluruh data master dan sesi yang identik dengan kondisi sebelum *reload* |
 | **AC-13** | Jadwal bebas konflik tetapi belum semua kebutuhan sesi terpenuhi tidak berstatus "Lengkap dan Valid" | Unit Test (`domain/workspace-validator.spec.ts`) | `status` bernilai `"INCOMPLETE"` atau `"NO_CONFLICT_CURRENT_DATA"`, bukan `"COMPLETE_AND_VALID"` |
+| **AC-14** | Pembuatan, duplikasi (`MASTER_DATA_ONLY` & `FULL_COPY`), perpindahan, serta penghapusan ruang kerja terisolasi di IndexedDB | Unit & Integration Test (`domain/workspace-cloner.spec.ts` & `integration/multi-workspace.spec.ts`) | Seluruh foreign key terpetakan ke ID baru, evaluasi konflik dan reset terisolasi per `workspaceId`, riwayat *Undo/Redo* direset saat berpindah, dan ruang kerja aktif dipulihkan |
 | **NFR-01** | Benchmark evaluasi konflik untuk 1.000 sesi selesai dalam `< 300 ms` | Performance Test (`domain/conflict-engine.spec.ts`) | `performance.now()` delta untuk `evaluateWorkspaceValidation(1000Sessions)` berada di bawah `300 ms` |
 
 ---
 
 ## 11. Tahapan Implementasi Teknis (Roadmap Eksekusi)
 
-Selaras dengan Bagian 14 PRD, implementasi kode akan dieksekusi dalam 5 fase berurutan berbasis TDD:
+Selaras dengan Bagian 14 PRD, implementasi kode dieksekusi dalam fase berurutan berbasis TDD:
 
 1. **Fase 1: Domain Engine & Unit Tests (Red-Green-Refactor)**
    - Implementasi tipe domain (`src/domain/types/`), utilitas waktu (`src/domain/time/`), *conflict engine* (`src/domain/validation/conflict-engine.ts`), dan validator kelengkapan (`src/domain/validation/completeness-engine.ts`).
@@ -854,3 +912,5 @@ Selaras dengan Bagian 14 PRD, implementasi kode akan dieksekusi dalam 5 fase ber
    - Pemasangan `jspdf`, `jspdf-autotable`, dan `xlsx` menggunakan `bun add`.
    - Implementasi `pdf-exporter.ts` (FR-08), `excel-exporter.ts` (FR-09), dan `ExportDialog` dengan peringatan konflik (AC-09, AC-10, AC-11).
    - Verifikasi menyeluruh (`bun run typecheck`, `bun run test`, `bun run build`).
+6. **Fase 6: Pengelolaan Multi-Ruang Kerja (Multi-Workspace Management — FR-13 & AC-14)**
+   - Implementasi `workspace-cloner.ts` (`src/domain/workspace/`), perluasan transaksi terisolasi per `workspaceId` di `workspace-repository.ts`, perluasan state & action di `use-workspace-store.ts`, serta pembangunan `WorkspaceSwitcher` di header `AppShell` dan `WorkspaceManagementCard` di `SettingsPage`.

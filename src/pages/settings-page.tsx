@@ -3,6 +3,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { DayScheduleConfigCard } from "@/components/workspace/day-schedule-config-card"
 import { WorkspaceDataManagementCard } from "@/components/workspace/workspace-data-management-card"
 import { WorkspaceIdentityCard } from "@/components/workspace/workspace-identity-card"
+import { WorkspaceManagementCard } from "@/components/workspace/workspace-management-card"
 import { useWorkspaceStore } from "@/store/use-workspace-store"
 
 export function SettingsPage() {
@@ -15,7 +16,7 @@ export function SettingsPage() {
           Pengaturan Ruang Kerja & Jam Belajar
         </h1>
         <p className="text-xs/relaxed text-muted-foreground">
-          Konfigurasikan identitas sekolah, hari aktif pembelajaran, jam mulai
+          Konfigurasikan identitas sekolah, hari efektif pembelajaran, jam mulai
           dan selesai per hari, ukuran interval snap grid, serta waktu istirahat.
           Setiap perubahan yang valid disimpan secara otomatis di browser Anda.
         </p>
@@ -40,6 +41,7 @@ export function SettingsPage() {
         </Alert>
       )}
 
+      <WorkspaceManagementCard />
       <WorkspaceIdentityCard />
       <DayScheduleConfigCard />
       <WorkspaceDataManagementCard />

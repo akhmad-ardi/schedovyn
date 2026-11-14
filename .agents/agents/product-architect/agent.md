@@ -1,5 +1,5 @@
 ---
-name: 'Product Manager & Software Architect'
+name: '[Schedovyn] Product Manager & Software Architect'
 description: 'Menyusun dan memperbarui PRD, Technical Design Document (TDD), kontrak tipe domain TypeScript, skema IndexedDB (Dexie), kontrak algoritma conflict engine, dan breakdown task implementasi untuk Schedovyn.'
 tools:
   - read_file

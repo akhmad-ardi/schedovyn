@@ -24,7 +24,12 @@ import {
 } from "@/domain/timetable/unscheduled-sessions"
 
 import {
+  validateWorkspaceMetaInput,
+} from "@/domain/workspace/workspace-cloner"
+import {
   DAY_OF_WEEK_LABELS,
+  type CreateWorkspaceInput,
+  type DuplicateWorkspaceInput,
   type BreakInterval,
   type ClassGroup,
   type DayOfWeek,
@@ -63,6 +68,8 @@ import {
   type WorkspaceConfigValidationResult,
 } from "@/domain/validation/workspace-config-validator"
 
+export const ACTIVE_WORKSPACE_STORAGE_KEY = "schedovyn_active_workspace_id"
+
 export type SaveStatus = "idle" | "saving" | "saved" | "error"
 export interface CopyScheduleOutcome {
   ok: boolean
@@ -90,6 +97,7 @@ export interface MasterDataMutationOutcome<T = void> {
 export interface WorkspaceStoreState {
   isHydrated: boolean
   isHydrating: boolean
+  workspaces: Workspace[]
   workspace: Workspace | null
   dayConfigs: DayScheduleConfig[]
   classes: ClassGroup[]
@@ -248,6 +256,13 @@ export interface WorkspaceStoreState {
   ) => Promise<CopyScheduleOutcome>
   applyFullDefaultSeed: () => Promise<boolean>
   clearAllSeedData: () => Promise<boolean>
+
+  // Multi-Workspace (FR-13)
+  switchWorkspace: (workspaceId: string) => Promise<{ ok: boolean; error?: string }>
+  createWorkspace: (input: CreateWorkspaceInput) => Promise<{ ok: boolean; error?: string }>
+  duplicateWorkspace: (input: DuplicateWorkspaceInput) => Promise<{ ok: boolean; error?: string }>
+  deleteWorkspace: (workspaceId: string) => Promise<{ ok: boolean; error?: string }>
+  deleteTimetableSession: (sessionId: string) => Promise<boolean>
 }
 
 export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
@@ -333,6 +348,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
             : savedWorkspace
           return {
             workspace: ws,
+            workspaces: state.workspaces.map((w) => (w.id === ws.id ? ws : w)),
             validationReport: runValidation({ workspace: ws, dayConfigs: nextDayConfigs }),
             saveStatus: "saved",
             lastSavedAt: savedWorkspace.updatedAt,
@@ -359,6 +375,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
   return {
     isHydrated: false,
     isHydrating: false,
+    workspaces: [],
     workspace: null,
     dayConfigs: [],
     classes: [],
@@ -386,7 +403,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
           saveErrorInfo: null, bootError: null })
 
       try {
-        const bundle = await workspaceRepo.loadOrSeedWorkspace()
+        const preferredWorkspaceId =
+          typeof localStorage !== "undefined"
+            ? localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY) || undefined
+            : undefined
+        const bundle = await workspaceRepo.loadOrSeedWorkspace(undefined, preferredWorkspaceId)
+        const allWorkspaces = await workspaceRepo.listWorkspaces()
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, bundle.workspace.id)
+        }
         const configValidation = validateWorkspaceConfig(
           bundle.workspace,
           bundle.dayConfigs
@@ -406,6 +431,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         set({
           isHydrated: true,
           isHydrating: false,
+          workspaces: allWorkspaces,
           workspace: bundle.workspace,
           dayConfigs: bundle.dayConfigs,
           classes: bundle.classes ?? [],
@@ -2091,7 +2117,9 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         applyFullDefaultSeed: async () => {
       set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
       try {
-        const bundle = await workspaceRepo.applyFullDefaultSeed()
+        const currentWorkspaceId = get().workspace?.id
+        const bundle = await workspaceRepo.applyFullDefaultSeed(currentWorkspaceId)
+        const allWorkspaces = await workspaceRepo.listWorkspaces()
         const validationReport = runValidation({
           workspace: bundle.workspace,
           dayConfigs: bundle.dayConfigs,
@@ -2108,6 +2136,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         )
 
         set({
+          workspaces: allWorkspaces,
           workspace: bundle.workspace,
           dayConfigs: bundle.dayConfigs,
           classes: bundle.classes,
@@ -2141,7 +2170,9 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
     clearAllSeedData: async () => {
       set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
       try {
-        const bundle = await workspaceRepo.clearAllSeedData()
+        const currentWorkspaceId = get().workspace?.id
+        const bundle = await workspaceRepo.clearAllSeedData(currentWorkspaceId)
+        const allWorkspaces = await workspaceRepo.listWorkspaces()
         const validationReport = runValidation({
           workspace: bundle.workspace,
           dayConfigs: bundle.dayConfigs,
@@ -2158,6 +2189,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         )
 
         set({
+          workspaces: allWorkspaces,
           workspace: bundle.workspace,
           dayConfigs: bundle.dayConfigs,
           classes: [],
@@ -2186,6 +2218,269 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => {
         })
         return false
       }
+    },
+
+    switchWorkspace: async (workspaceId: string) => {
+      set({ isHydrating: true, saveErrorMessage: null, saveErrorInfo: null })
+      try {
+        const bundle = await workspaceRepo.loadWorkspaceById(workspaceId)
+        if (!bundle) {
+          set({ isHydrating: false })
+          return { ok: false, error: "Ruang kerja tidak ditemukan." }
+        }
+        const allWorkspaces = await workspaceRepo.listWorkspaces()
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, bundle.workspace.id)
+        }
+        const configValidation = validateWorkspaceConfig(
+          bundle.workspace,
+          bundle.dayConfigs
+        )
+        const validationReport = evaluateWorkspaceValidation({
+          dayConfigs: bundle.dayConfigs,
+          classes: bundle.classes,
+          teachers: bundle.teachers,
+          rooms: bundle.rooms,
+          subjects: bundle.subjects,
+          requirements: bundle.requirements,
+          sessions: bundle.sessions,
+          activeClassId: bundle.workspace.activeClassId ?? null,
+        })
+
+        set({
+          isHydrated: true,
+          isHydrating: false,
+          workspaces: allWorkspaces,
+          workspace: bundle.workspace,
+          dayConfigs: bundle.dayConfigs,
+          classes: bundle.classes,
+          subjects: bundle.subjects,
+          teachers: bundle.teachers,
+          rooms: bundle.rooms,
+          requirements: bundle.requirements,
+          sessions: bundle.sessions,
+          selectedSessionId: null,
+          historyPast: [],
+          historyFuture: [],
+          configValidation,
+          validationReport,
+          saveStatus: "saved",
+          lastSavedAt: bundle.workspace.updatedAt,
+          saveErrorMessage: null,
+          saveErrorInfo: null,
+        })
+        return { ok: true }
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
+        set({
+          isHydrating: false,
+          saveStatus: "error",
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
+        })
+        return { ok: false, error: errorInfo.message }
+      }
+    },
+
+    createWorkspace: async (input: CreateWorkspaceInput) => {
+      const validation = validateWorkspaceMetaInput({
+        name: input.name,
+        academicPeriod: input.academicPeriod,
+        defaultSnapIntervalMinutes: input.defaultSnapIntervalMinutes,
+      })
+      if (!validation.valid) {
+        return { ok: false, error: validation.errors[0] }
+      }
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
+      try {
+        const bundle = await workspaceRepo.createWorkspaceInDb(input)
+        const allWorkspaces = await workspaceRepo.listWorkspaces()
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, bundle.workspace.id)
+        }
+        const configValidation = validateWorkspaceConfig(
+          bundle.workspace,
+          bundle.dayConfigs
+        )
+        const validationReport = evaluateWorkspaceValidation({
+          dayConfigs: bundle.dayConfigs,
+          classes: bundle.classes,
+          teachers: bundle.teachers,
+          rooms: bundle.rooms,
+          subjects: bundle.subjects,
+          requirements: bundle.requirements,
+          sessions: bundle.sessions,
+          activeClassId: bundle.workspace.activeClassId ?? null,
+        })
+
+        set({
+          workspaces: allWorkspaces,
+          workspace: bundle.workspace,
+          dayConfigs: bundle.dayConfigs,
+          classes: bundle.classes,
+          subjects: bundle.subjects,
+          teachers: bundle.teachers,
+          rooms: bundle.rooms,
+          requirements: bundle.requirements,
+          sessions: bundle.sessions,
+          selectedSessionId: null,
+          historyPast: [],
+          historyFuture: [],
+          configValidation,
+          validationReport,
+          saveStatus: "saved",
+          lastSavedAt: bundle.workspace.updatedAt,
+          saveErrorMessage: null,
+          saveErrorInfo: null,
+        })
+        return { ok: true }
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
+        set({
+          saveStatus: "error",
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
+        })
+        return { ok: false, error: errorInfo.message }
+      }
+    },
+
+    duplicateWorkspace: async (input: DuplicateWorkspaceInput) => {
+      const validation = validateWorkspaceMetaInput({
+        name: input.name,
+        academicPeriod: input.academicPeriod,
+      })
+      if (!validation.valid) {
+        return { ok: false, error: validation.errors[0] }
+      }
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
+      try {
+        const bundle = await workspaceRepo.duplicateWorkspaceInDb(input)
+        const allWorkspaces = await workspaceRepo.listWorkspaces()
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, bundle.workspace.id)
+        }
+        const configValidation = validateWorkspaceConfig(
+          bundle.workspace,
+          bundle.dayConfigs
+        )
+        const validationReport = evaluateWorkspaceValidation({
+          dayConfigs: bundle.dayConfigs,
+          classes: bundle.classes,
+          teachers: bundle.teachers,
+          rooms: bundle.rooms,
+          subjects: bundle.subjects,
+          requirements: bundle.requirements,
+          sessions: bundle.sessions,
+          activeClassId: bundle.workspace.activeClassId ?? null,
+        })
+
+        set({
+          workspaces: allWorkspaces,
+          workspace: bundle.workspace,
+          dayConfigs: bundle.dayConfigs,
+          classes: bundle.classes,
+          subjects: bundle.subjects,
+          teachers: bundle.teachers,
+          rooms: bundle.rooms,
+          requirements: bundle.requirements,
+          sessions: bundle.sessions,
+          selectedSessionId: null,
+          historyPast: [],
+          historyFuture: [],
+          configValidation,
+          validationReport,
+          saveStatus: "saved",
+          lastSavedAt: bundle.workspace.updatedAt,
+          saveErrorMessage: null,
+          saveErrorInfo: null,
+        })
+        return { ok: true }
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
+        set({
+          saveStatus: "error",
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
+        })
+        return { ok: false, error: errorInfo.message }
+      }
+    },
+
+    deleteWorkspace: async (workspaceId: string) => {
+      const currentWorkspaces = get().workspaces
+      if (currentWorkspaces.length <= 1) {
+        return {
+          ok: false,
+          error: "Tidak dapat menghapus satu-satunya ruang kerja yang tersisa.",
+        }
+      }
+      set({ saveStatus: "saving", saveErrorMessage: null, saveErrorInfo: null })
+      try {
+        await workspaceRepo.deleteWorkspaceFromDb(workspaceId)
+        const remainingWorkspaces = await workspaceRepo.listWorkspaces()
+        if (get().workspace?.id === workspaceId) {
+          const nextWs = remainingWorkspaces[0]
+          const bundle = await workspaceRepo.loadWorkspaceById(nextWs.id)
+          if (bundle) {
+            if (typeof localStorage !== "undefined") {
+              localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, bundle.workspace.id)
+            }
+            const configValidation = validateWorkspaceConfig(
+              bundle.workspace,
+              bundle.dayConfigs
+            )
+            const validationReport = evaluateWorkspaceValidation({
+              dayConfigs: bundle.dayConfigs,
+              classes: bundle.classes,
+              teachers: bundle.teachers,
+              rooms: bundle.rooms,
+              subjects: bundle.subjects,
+              requirements: bundle.requirements,
+              sessions: bundle.sessions,
+              activeClassId: bundle.workspace.activeClassId ?? null,
+            })
+            set({
+              workspaces: remainingWorkspaces,
+              workspace: bundle.workspace,
+              dayConfigs: bundle.dayConfigs,
+              classes: bundle.classes,
+              subjects: bundle.subjects,
+              teachers: bundle.teachers,
+              rooms: bundle.rooms,
+              requirements: bundle.requirements,
+              sessions: bundle.sessions,
+              selectedSessionId: null,
+              historyPast: [],
+              historyFuture: [],
+              configValidation,
+              validationReport,
+              saveStatus: "saved",
+              lastSavedAt: bundle.workspace.updatedAt,
+              saveErrorMessage: null,
+              saveErrorInfo: null,
+            })
+          }
+        } else {
+          set({
+            workspaces: remainingWorkspaces,
+            saveStatus: "saved",
+          })
+        }
+        return { ok: true }
+      } catch (error) {
+        const errorInfo = diagnoseStorageError(error)
+        set({
+          saveStatus: "error",
+          saveErrorMessage: errorInfo.message,
+          saveErrorInfo: errorInfo,
+        })
+        return { ok: false, error: errorInfo.message }
+      }
+    },
+
+    deleteTimetableSession: async (sessionId: string) => {
+      return get().removeSession(sessionId)
     },
   }
 })

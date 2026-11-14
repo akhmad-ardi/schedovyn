@@ -45,7 +45,7 @@ export function DayScheduleConfigCard() {
       <CardHeader className="border-b border-border">
         <CardTitle>Konfigurasi Hari & Jam Operasional Pembelajaran</CardTitle>
         <CardDescription>
-          Tentukan hari aktif sekolah (termasuk opsi hari Sabtu), rentang jam
+          Tentukan hari efektif sekolah (termasuk opsi hari Sabtu), rentang jam
           mulai dan selesai belajar per hari dalam format 24 jam, serta periode
           waktu istirahat harian.
         </CardDescription>
@@ -94,8 +94,8 @@ export function DayScheduleConfigCard() {
                       }
                     >
                       {dayConfig.isSchoolDay
-                        ? "Hari Sekolah Aktif"
-                        : "Libur / Nonaktif"}
+                        ? "Hari Pembelajaran"
+                        : "Hari Libur"}
                     </span>
                   </div>
                 </div>

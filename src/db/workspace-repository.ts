@@ -1,8 +1,14 @@
 import { db as defaultDb, type SchedovynDatabase } from "@/db/database"
 import { createDefaultWorkspaceSeed } from "@/db/seed-default"
 import {
+  cloneWorkspaceSnapshot,
+  createBlankWorkspaceBundle,
+} from "@/domain/workspace/workspace-cloner"
+import {
   ORDERED_DAYS_OF_WEEK,
   type ClassGroup,
+  type CreateWorkspaceInput,
+  type DuplicateWorkspaceInput,
   type DayScheduleConfig,
   type Room,
   type Subject,
@@ -39,8 +45,292 @@ function sortDayConfigs(dayConfigs: DayScheduleConfig[]): DayScheduleConfig[] {
   )
 }
 
-export async function loadOrSeedWorkspace(
+export async function listWorkspaces(
   database: SchedovynDatabase = defaultDb
+): Promise<Workspace[]> {
+  const workspaces = await database.workspaces.toArray()
+  return workspaces.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+}
+
+export async function loadWorkspaceById(
+  workspaceId: string,
+  database: SchedovynDatabase = defaultDb
+): Promise<HydratedWorkspaceBundle | null> {
+  const workspace = await database.workspaces.get(workspaceId)
+  if (!workspace) {
+    return null
+  }
+
+  const [
+    rawDays,
+    classes,
+    subjects,
+    teachers,
+    rooms,
+    requirements,
+    sessions,
+  ] = await Promise.all([
+    database.dayConfigs.where("workspaceId").equals(workspaceId).toArray(),
+    database.classes.where("workspaceId").equals(workspaceId).toArray(),
+    database.subjects.where("workspaceId").equals(workspaceId).toArray(),
+    database.teachers.where("workspaceId").equals(workspaceId).toArray(),
+    database.rooms.where("workspaceId").equals(workspaceId).toArray(),
+    database.requirements.where("workspaceId").equals(workspaceId).toArray(),
+    database.sessions.where("workspaceId").equals(workspaceId).toArray(),
+  ])
+
+  let dayConfigs = rawDays
+  if (dayConfigs.length === 0) {
+    const seed = createDefaultWorkspaceSeed({ workspaceId })
+    dayConfigs = seed.dayConfigs
+  }
+
+  let resolvedWorkspace = workspace
+  const resolvedActiveClassId =
+    workspace.activeClassId !== null &&
+    classes.some((c) => c.id === workspace.activeClassId)
+      ? workspace.activeClassId
+      : (classes[0]?.id ?? null)
+
+  if (resolvedActiveClassId !== workspace.activeClassId) {
+    resolvedWorkspace = {
+      ...workspace,
+      activeClassId: resolvedActiveClassId,
+      updatedAt: new Date().toISOString(),
+    }
+    await database.workspaces.put(resolvedWorkspace)
+  }
+
+  return {
+    workspace: resolvedWorkspace,
+    dayConfigs: sortDayConfigs(dayConfigs),
+    classes,
+    subjects,
+    teachers,
+    rooms,
+    requirements,
+    sessions,
+  }
+}
+
+export async function createWorkspaceInDb(
+  input: CreateWorkspaceInput,
+  database: SchedovynDatabase = defaultDb
+): Promise<HydratedWorkspaceBundle> {
+  return database.transaction(
+    "rw",
+    [
+      database.workspaces,
+      database.dayConfigs,
+      database.classes,
+      database.subjects,
+      database.teachers,
+      database.rooms,
+      database.requirements,
+      database.sessions,
+    ],
+    async () => {
+      if (input.initMode === "BLANK") {
+        const bundle = createBlankWorkspaceBundle({ input })
+        await database.workspaces.put(bundle.workspace)
+        await database.dayConfigs.bulkPut(bundle.dayConfigs)
+        return {
+          workspace: bundle.workspace,
+          dayConfigs: sortDayConfigs(bundle.dayConfigs),
+          classes: [],
+          subjects: [],
+          teachers: [],
+          rooms: [],
+          requirements: [],
+          sessions: [],
+        }
+      }
+
+      const newWorkspaceId = crypto.randomUUID()
+      const seed = createDefaultWorkspaceSeed({
+        workspaceId: newWorkspaceId,
+        name: input.name,
+        academicPeriod: input.academicPeriod,
+        defaultSnapIntervalMinutes: input.defaultSnapIntervalMinutes,
+      })
+
+      const seededWorkspace: Workspace = {
+        ...seed.workspace,
+        activeClassId: seed.classes[0]?.id ?? null,
+      }
+
+      await database.workspaces.put(seededWorkspace)
+      await Promise.all([
+        database.dayConfigs.bulkPut(seed.dayConfigs),
+        database.classes.bulkPut(seed.classes),
+        database.subjects.bulkPut(seed.subjects),
+        database.teachers.bulkPut(seed.teachers),
+        database.rooms.bulkPut(seed.rooms),
+        database.requirements.bulkPut(seed.requirements),
+        database.sessions.bulkPut(seed.sessions),
+      ])
+
+      return {
+        workspace: seededWorkspace,
+        dayConfigs: sortDayConfigs(seed.dayConfigs),
+        classes: seed.classes,
+        subjects: seed.subjects,
+        teachers: seed.teachers,
+        rooms: seed.rooms,
+        requirements: seed.requirements,
+        sessions: seed.sessions,
+      }
+    }
+  )
+}
+
+export async function duplicateWorkspaceInDb(
+  input: DuplicateWorkspaceInput,
+  database: SchedovynDatabase = defaultDb
+): Promise<HydratedWorkspaceBundle> {
+  return database.transaction(
+    "rw",
+    [
+      database.workspaces,
+      database.dayConfigs,
+      database.classes,
+      database.subjects,
+      database.teachers,
+      database.rooms,
+      database.requirements,
+      database.sessions,
+    ],
+    async () => {
+      const sourceWorkspace = await database.workspaces.get(
+        input.sourceWorkspaceId
+      )
+      if (!sourceWorkspace) {
+        throw new Error(
+          `Ruang kerja sumber tidak ditemukan: ${input.sourceWorkspaceId}`
+        )
+      }
+
+      const [
+        dayConfigs,
+        classes,
+        subjects,
+        teachers,
+        rooms,
+        requirements,
+        sessions,
+      ] = await Promise.all([
+        database.dayConfigs
+          .where("workspaceId")
+          .equals(sourceWorkspace.id)
+          .toArray(),
+        database.classes
+          .where("workspaceId")
+          .equals(sourceWorkspace.id)
+          .toArray(),
+        database.subjects
+          .where("workspaceId")
+          .equals(sourceWorkspace.id)
+          .toArray(),
+        database.teachers
+          .where("workspaceId")
+          .equals(sourceWorkspace.id)
+          .toArray(),
+        database.rooms
+          .where("workspaceId")
+          .equals(sourceWorkspace.id)
+          .toArray(),
+        database.requirements
+          .where("workspaceId")
+          .equals(sourceWorkspace.id)
+          .toArray(),
+        database.sessions
+          .where("workspaceId")
+          .equals(sourceWorkspace.id)
+          .toArray(),
+      ])
+
+      const cloned = cloneWorkspaceSnapshot({
+        source: {
+          workspace: sourceWorkspace,
+          dayConfigs,
+          classes,
+          subjects,
+          teachers,
+          rooms,
+          requirements,
+          sessions,
+        },
+        input,
+      })
+
+      await database.workspaces.put(cloned.workspace)
+      await Promise.all([
+        database.dayConfigs.bulkPut(cloned.dayConfigs),
+        database.classes.bulkPut(cloned.classes),
+        database.subjects.bulkPut(cloned.subjects),
+        database.teachers.bulkPut(cloned.teachers),
+        database.rooms.bulkPut(cloned.rooms),
+        database.requirements.bulkPut(cloned.requirements),
+        cloned.sessions.length > 0
+          ? database.sessions.bulkPut(cloned.sessions)
+          : Promise.resolve(),
+      ])
+
+      return {
+        workspace: cloned.workspace,
+        dayConfigs: sortDayConfigs(cloned.dayConfigs),
+        classes: cloned.classes,
+        subjects: cloned.subjects,
+        teachers: cloned.teachers,
+        rooms: cloned.rooms,
+        requirements: cloned.requirements,
+        sessions: cloned.sessions,
+      }
+    }
+  )
+}
+
+export async function deleteWorkspaceFromDb(
+  workspaceId: string,
+  database: SchedovynDatabase = defaultDb
+): Promise<void> {
+  return database.transaction(
+    "rw",
+    [
+      database.workspaces,
+      database.dayConfigs,
+      database.classes,
+      database.subjects,
+      database.teachers,
+      database.rooms,
+      database.requirements,
+      database.sessions,
+    ],
+    async () => {
+      const count = await database.workspaces.count()
+      if (count <= 1) {
+        throw new Error(
+          "Tidak dapat menghapus satu-satunya ruang kerja yang tersisa."
+        )
+      }
+
+      await Promise.all([
+        database.dayConfigs.where("workspaceId").equals(workspaceId).delete(),
+        database.classes.where("workspaceId").equals(workspaceId).delete(),
+        database.subjects.where("workspaceId").equals(workspaceId).delete(),
+        database.teachers.where("workspaceId").equals(workspaceId).delete(),
+        database.rooms.where("workspaceId").equals(workspaceId).delete(),
+        database.requirements.where("workspaceId").equals(workspaceId).delete(),
+        database.sessions.where("workspaceId").equals(workspaceId).delete(),
+        database.workspaces.delete(workspaceId),
+      ])
+    }
+  )
+}
+
+export async function loadOrSeedWorkspace(
+  database: SchedovynDatabase = defaultDb,
+  preferredWorkspaceId?: string | null
 ): Promise<HydratedWorkspaceBundle> {
   return database.transaction(
     "rw",
@@ -57,7 +347,13 @@ export async function loadOrSeedWorkspace(
     async () => {
       const existingWorkspaces = await database.workspaces.toArray()
       if (existingWorkspaces.length > 0) {
-        const workspace = existingWorkspaces[0]
+        let workspace = existingWorkspaces[0]
+        if (preferredWorkspaceId) {
+          const found = existingWorkspaces.find((w) => w.id === preferredWorkspaceId)
+          if (found) {
+            workspace = found
+          }
+        }
         const [
           rawDays,
           classes,
@@ -717,9 +1013,34 @@ export async function persistFullWorkspaceSnapshot(
  * Kelas aktif otomatis disetel ke kelas pertama (VII-A).
  */
 export async function applyFullDefaultSeed(
-  database: SchedovynDatabase = defaultDb
+  databaseOrWorkspaceId?: SchedovynDatabase | string,
+  targetWorkspaceId?: string
 ): Promise<HydratedWorkspaceBundle> {
-  const seed = createDefaultWorkspaceSeed()
+  const database =
+    typeof databaseOrWorkspaceId === "object" && databaseOrWorkspaceId !== null
+      ? (databaseOrWorkspaceId as SchedovynDatabase)
+      : defaultDb
+  const effectiveTargetId =
+    typeof databaseOrWorkspaceId === "string"
+      ? databaseOrWorkspaceId
+      : targetWorkspaceId
+
+  const existingWorkspaces = await database.workspaces.toArray()
+  let targetWs: Workspace | undefined
+  if (effectiveTargetId) {
+    targetWs = existingWorkspaces.find((w) => w.id === effectiveTargetId)
+  } else if (existingWorkspaces.length > 0) {
+    targetWs = existingWorkspaces[0]
+  }
+
+  const workspaceIdToUse = targetWs?.id ?? "ws-smpn1-nusantara"
+  const seed = createDefaultWorkspaceSeed({
+    workspaceId: workspaceIdToUse,
+    name: targetWs?.name,
+    academicPeriod: targetWs?.academicPeriod,
+    defaultSnapIntervalMinutes: targetWs?.defaultSnapIntervalMinutes,
+  })
+
   const activeClassId = seed.classes[0]?.id ?? null
   const seededWorkspace: Workspace = {
     ...seed.workspace,
@@ -740,16 +1061,28 @@ export async function applyFullDefaultSeed(
       database.sessions,
     ],
     async () => {
-      await Promise.all([
-        database.workspaces.clear(),
-        database.dayConfigs.clear(),
-        database.classes.clear(),
-        database.subjects.clear(),
-        database.teachers.clear(),
-        database.rooms.clear(),
-        database.requirements.clear(),
-        database.sessions.clear(),
-      ])
+      if (existingWorkspaces.length > 1 || effectiveTargetId) {
+        await Promise.all([
+          database.dayConfigs.where("workspaceId").equals(workspaceIdToUse).delete(),
+          database.classes.where("workspaceId").equals(workspaceIdToUse).delete(),
+          database.subjects.where("workspaceId").equals(workspaceIdToUse).delete(),
+          database.teachers.where("workspaceId").equals(workspaceIdToUse).delete(),
+          database.rooms.where("workspaceId").equals(workspaceIdToUse).delete(),
+          database.requirements.where("workspaceId").equals(workspaceIdToUse).delete(),
+          database.sessions.where("workspaceId").equals(workspaceIdToUse).delete(),
+        ])
+      } else {
+        await Promise.all([
+          database.workspaces.clear(),
+          database.dayConfigs.clear(),
+          database.classes.clear(),
+          database.subjects.clear(),
+          database.teachers.clear(),
+          database.rooms.clear(),
+          database.requirements.clear(),
+          database.sessions.clear(),
+        ])
+      }
 
       await database.workspaces.put(seededWorkspace)
       await Promise.all([
@@ -781,8 +1114,18 @@ export async function applyFullDefaultSeed(
  * mereset activeClassId menjadi null, namun mempertahankan konfigurasi ruang kerja & hari.
  */
 export async function clearAllSeedData(
-  database: SchedovynDatabase = defaultDb
+  databaseOrWorkspaceId?: SchedovynDatabase | string,
+  targetWorkspaceId?: string
 ): Promise<HydratedWorkspaceBundle> {
+  const database =
+    typeof databaseOrWorkspaceId === "object" && databaseOrWorkspaceId !== null
+      ? (databaseOrWorkspaceId as SchedovynDatabase)
+      : defaultDb
+  const effectiveTargetId =
+    typeof databaseOrWorkspaceId === "string"
+      ? databaseOrWorkspaceId
+      : targetWorkspaceId
+
   return database.transaction(
     "rw",
     [
@@ -801,8 +1144,14 @@ export async function clearAllSeedData(
       let dayConfigs: DayScheduleConfig[]
 
       if (existingWorkspaces.length > 0) {
+        let target = existingWorkspaces[0]
+        if (effectiveTargetId) {
+          const found = existingWorkspaces.find((w) => w.id === effectiveTargetId)
+          if (found) target = found
+        }
+
         workspace = {
-          ...existingWorkspaces[0],
+          ...target,
           activeClassId: null,
           updatedAt: new Date().toISOString(),
         }
@@ -811,6 +1160,15 @@ export async function clearAllSeedData(
           .where("workspaceId")
           .equals(workspace.id)
           .toArray()
+
+        await Promise.all([
+          database.classes.where("workspaceId").equals(workspace.id).delete(),
+          database.subjects.where("workspaceId").equals(workspace.id).delete(),
+          database.teachers.where("workspaceId").equals(workspace.id).delete(),
+          database.rooms.where("workspaceId").equals(workspace.id).delete(),
+          database.requirements.where("workspaceId").equals(workspace.id).delete(),
+          database.sessions.where("workspaceId").equals(workspace.id).delete(),
+        ])
       } else {
         const seed = createDefaultWorkspaceSeed()
         workspace = {
@@ -822,15 +1180,6 @@ export async function clearAllSeedData(
         await database.dayConfigs.bulkPut(seed.dayConfigs)
         dayConfigs = seed.dayConfigs
       }
-
-      await Promise.all([
-        database.classes.clear(),
-        database.subjects.clear(),
-        database.teachers.clear(),
-        database.rooms.clear(),
-        database.requirements.clear(),
-        database.sessions.clear(),
-      ])
 
       return {
         workspace,

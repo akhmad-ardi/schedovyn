@@ -1,7 +1,7 @@
 # Product Requirements Document (PRD) - Schedovyn
 
-**Versi:** 1.0.0  
-**Status:** Draft  
+**Versi:** 1.1.0  
+**Status:** Active  
 **Jenis Produk:** Client-side Web Application  
 **Target Pengguna:** Admin sekolah, guru, atau staf yang bertugas menyusun jadwal pembelajaran  
 **Platform:** Web Desktop  
@@ -104,9 +104,9 @@ Pengguna merupakan admin sekolah, guru, atau staf yang bertanggung jawab menyusu
 
 ### 3.2 Model Penggunaan
 
-Aplikasi mendukung satu ruang kerja lokal pada satu browser. Ruang kerja tersebut dapat berisi banyak kelas, guru, mata pelajaran, ruangan, dan sesi pembelajaran.
+Aplikasi mendukung satu atau lebih ruang kerja (*workspace*) lokal pada satu browser. Setiap ruang kerja dapat berisi banyak kelas, guru, mata pelajaran, ruangan, dan sesi pembelajaran untuk satu periode akademik (misalnya Semester Ganjil vs. Semester Genap) atau skenario simulasi jadwal.
 
-Pengguna memilih satu kelas sebagai kelas aktif untuk penyuntingan, tetapi mesin pendeteksi konflik memeriksa seluruh sesi yang tersimpan dalam ruang kerja.
+Pengguna bekerja pada satu ruang kerja aktif dan memilih satu kelas sebagai kelas aktif untuk penyuntingan, sementara mesin pendeteksi konflik selalu memeriksa seluruh sesi yang tersimpan di dalam ruang kerja yang sedang aktif tersebut.
 
 Tidak terdapat pemisahan data berdasarkan akun atau pengguna.
 
@@ -130,6 +130,7 @@ Tidak terdapat pemisahan data berdasarkan akun atau pengguna.
 | FR-10 | Penyimpanan otomatis lokal | Must Have |
 | FR-11 | Ringkasan validasi jadwal | Must Have |
 | FR-12 | Penyalinan sesi atau jadwal | Could Have |
+| FR-13 | Pengelolaan multi-ruang kerja (multi-workspace) | Should Have |
 
 ---
 
@@ -464,6 +465,26 @@ Jika diterapkan, sistem harus:
 - Memperlihatkan konflik baru yang dihasilkan.
 
 Fitur ini bukan prasyarat peluncuran MVP.
+
+### FR-13 — Pengelolaan Multi-Ruang Kerja (Multi-Workspace)
+
+Pengguna dapat membuat, mengelola, menduplikasi, berpindah, dan menghapus beberapa ruang kerja (*workspace*) di dalam penyimpanan browser lokal untuk memisahkan jadwal antar-semester, tahun ajaran, atau skenario simulasi jadwal.
+
+Persyaratan:
+
+1. **Pemilih Ruang Kerja Aktif (*Workspace Switcher*):** Pengguna dapat melihat ruang kerja yang sedang aktif di header aplikasi dan berpindah ke ruang kerja lain yang tersimpan di browser tanpa kehilangan data ruang kerja sebelumnya.
+2. **Pembuatan Ruang Kerja Baru:** Pengguna dapat membuat ruang kerja baru dengan menentukan nama sekolah/ruang kerja, periode akademik, interval snap default, serta memilih mode inisialisasi:
+   - **Ruang Kerja Kosong (`BLANK`):** Memiliki konfigurasi hari default (Senin–Jumat aktif, Sabtu–Minggu libur) tanpa data master dan tanpa sesi.
+   - **Muat Data Contoh (`SEED_DEFAULT`):** Mengisi ruang kerja baru dengan data contoh terisolasi yang menggunakan identitas unik sehingga tidak menimpa ruang kerja lain.
+3. **Duplikasi Ruang Kerja (*Clone Workspace*):** Pengguna dapat menduplikasi ruang kerja yang sudah ada ke ruang kerja baru dengan dua pilihan mode:
+   - **Konfigurasi & Data Master Saja (`MASTER_DATA_ONLY`):** Menyalin konfigurasi jam belajar, kelas, guru, mata pelajaran, ruangan, dan kebutuhan pembelajaran dengan identitas baru yang terpetakan secara konsisten, sementara jadwal sesi dikosongkan (`sessions = []`) untuk penyusunan semester baru.
+   - **Salin Penuh Beserta Jadwal (`FULL_COPY`):** Menyalin seluruh konfigurasi, data master, kebutuhan pembelajaran, beserta penempatan sesi jadwal untuk keperluan simulasi atau pencadangan lokal.
+4. **Isolasi Data, Validasi, dan Riwayat:**
+   - Perhitungan *Smart Conflict Detection* (`FR-05`) dan validasi kelengkapan (`FR-11`) selalu terisolasi di dalam batas ruang kerja yang sedang aktif.
+   - Saat berpindah ruang kerja, tumpukan riwayat *Undo/Redo* (`FR-07`) direset agar aksi pembatalan tidak memengaruhi ruang kerja lain.
+   - Operasi pengosongan data atau pemuatan ulang data contoh pada ruang kerja aktif tidak boleh menghapus atau mengubah ruang kerja lain.
+5. **Penghapusan Ruang Kerja:** Pengguna dapat menghapus ruang kerja beserta seluruh data turunannya secara atomik, dengan batasan bahwa sistem wajib mempertahankan minimal satu ruang kerja aktif (tombol hapus dinonaktifkan apabila hanya tersisa satu ruang kerja).
+6. **Pemulihan Ruang Kerja Terakhir:** Sistem mengingat ruang kerja aktif terakhir yang dibuka pengguna dan memulihkannya secara otomatis ketika aplikasi dimuat ulang pada browser dan profil yang sama.
 
 ---
 
@@ -857,6 +878,12 @@ MVP dianggap berhasil jika:
 **Given** belum semua kebutuhan sesi di seluruh ruang kerja terpenuhi,  
 **When** tidak terdapat konflik pada sesi yang sudah ditempatkan,  
 **Then** sistem tidak menyatakan seluruh jadwal lengkap dan valid.
+
+### AC-14 — Pengelolaan dan Isolasi Multi-Ruang Kerja
+
+**Given** pengguna memiliki ruang kerja aktif berisi data master dan jadwal yang telah disusun,  
+**When** pengguna membuat ruang kerja baru atau menduplikasi ruang kerja (baik mode *Konfigurasi & Data Master Saja* maupun *Salin Penuh Beserta Jadwal*) lalu berpindah antar-ruang kerja,  
+**Then** setiap ruang kerja memiliki identitas entitas yang terisolasi di IndexedDB, evaluasi konflik serta aksi reset/hapus pada satu ruang kerja tidak memengaruhi ruang kerja lain, tumpukan *Undo/Redo* direset saat berpindah ruang kerja, dan ruang kerja aktif terakhir otomatis dipulihkan saat halaman dimuat ulang.
 
 ---
 

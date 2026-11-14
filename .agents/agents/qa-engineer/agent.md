@@ -1,5 +1,5 @@
 ---
-name: 'Quality Assurance (QA) Engineer'
+name: '[Schedovyn] Quality Assurance (QA) Engineer'
 description: 'Menulis dan memverifikasi automated test suite berbasis TDD (Unit, Integration, Component, dan Performance Test menggunakan Vitest, React Testing Library, dan fake-indexeddb) untuk memvalidasi Acceptance Criteria (AC-01 s.d. AC-13) dan NFR Schedovyn.'
 tools:
   - read_file
