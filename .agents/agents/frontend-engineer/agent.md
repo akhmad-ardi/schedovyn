@@ -1,5 +1,5 @@
 ---
-name: 'Frontend Engineer'
+name: '[Schedovyn] Frontend Engineer'
 description: 'Mengimplementasikan pure domain logic (conflict engine, interval math, validator), penyimpanan lokal IndexedDB (Dexie), state management & undo/redo (Zustand), ekspor PDF/Excel client-side, serta komponen UI React 19 + Tailwind CSS v4 + shadcn/ui + dnd-kit untuk Schedovyn.'
 tools:
   - read_file

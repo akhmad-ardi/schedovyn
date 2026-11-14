@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { SaveStatusBadge } from "@/components/layout/save-status-badge"
+import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher"
 import { PwaInstallButton } from "@/components/pwa/pwa-install-button"
 import { PwaReloadPrompt } from "@/components/pwa/pwa-reload-prompt"
 import { usePwa } from "@/hooks/use-pwa"
@@ -118,17 +119,7 @@ export function AppShell({ children }: AppShellProps) {
             </span>
             <span className="h-4 w-px bg-border" aria-hidden="true" />
             {workspace ? (
-              <div className="flex flex-wrap items-center gap-1.5 text-xs min-w-0">
-                <span className="font-medium text-foreground truncate">
-                  {workspace.name}
-                </span>
-                <span className="text-muted-foreground" aria-hidden="true">
-                  ·
-                </span>
-                <span className="text-muted-foreground truncate">
-                  {workspace.academicPeriod}
-                </span>
-              </div>
+              <WorkspaceSwitcher />
             ) : (
               <span className="text-xs text-muted-foreground">
                 Memuat ruang kerja...

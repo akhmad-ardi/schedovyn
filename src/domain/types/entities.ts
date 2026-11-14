@@ -26,6 +26,22 @@ export type SubjectColorKey =
   | "indigo"
   | "slate"
 
+/**
+ * Mode inisialisasi saat membuat ruang kerja baru (FR-13).
+ * - BLANK: Hanya membuat Workspace + 7 DayScheduleConfig bawaan (Senin-Jumat aktif, Sabtu-Minggu nonaktif).
+ * - SEED_DEFAULT: Mengisi Workspace baru dengan data contoh SMP Negeri 1 Nusantara menggunakan ID unik.
+ */
+export type WorkspaceInitMode = "BLANK" | "SEED_DEFAULT"
+
+/**
+ * Mode penyalinan saat menduplikasi ruang kerja yang sudah ada (FR-13).
+ * - MASTER_DATA_ONLY: Menyalin konfigurasi hari, kelas, guru, mata pelajaran, ruangan, dan kebutuhan pembelajaran
+ *   tanpa menyalin penempatan sesi jadwal (sessions = []), sehingga siap dijadwalkan ulang untuk semester baru.
+ * - FULL_COPY: Menyalin seluruh konfigurasi, data master, kebutuhan pembelajaran, beserta posisi sesi terjadwal.
+ */
+export type WorkspaceDuplicateMode = "MASTER_DATA_ONLY" | "FULL_COPY"
+export type DuplicateWorkspaceMode = WorkspaceDuplicateMode
+
 export const ORDERED_DAYS_OF_WEEK: readonly DayOfWeek[] = [
   "monday",
   "tuesday",
@@ -92,6 +108,29 @@ export const SUBJECT_COLOR_LABELS: Record<SubjectColorKey, string> = {
   slate: "Abu-abu Batu",
 }
 
+export const WORKSPACE_INIT_MODE_OPTIONS: readonly WorkspaceInitMode[] = [
+  "BLANK",
+  "SEED_DEFAULT",
+] as const
+
+export const WORKSPACE_INIT_MODE_LABELS: Record<WorkspaceInitMode, string> = {
+  BLANK: "Ruang Kerja Kosong",
+  SEED_DEFAULT: "Muat Data Contoh (SMPN 1 Nusantara)",
+}
+
+export const WORKSPACE_DUPLICATE_MODE_OPTIONS: readonly WorkspaceDuplicateMode[] = [
+  "MASTER_DATA_ONLY",
+  "FULL_COPY",
+] as const
+
+export const WORKSPACE_DUPLICATE_MODE_LABELS: Record<
+  WorkspaceDuplicateMode,
+  string
+> = {
+  MASTER_DATA_ONLY: "Konfigurasi & Data Master Saja (Semester Baru)",
+  FULL_COPY: "Salin Penuh Beserta Jadwal (Simulasi / Cadangan)",
+}
+
 export interface TimeInterval {
   id: string
   dayOfWeek: DayOfWeek
@@ -126,6 +165,20 @@ export interface Workspace {
   defaultSnapIntervalMinutes: SnapIntervalMinutes
   createdAt: string
   updatedAt: string
+}
+
+export interface CreateWorkspaceInput {
+  name: string
+  academicPeriod: string
+  defaultSnapIntervalMinutes: SnapIntervalMinutes
+  initMode: WorkspaceInitMode
+}
+
+export interface DuplicateWorkspaceInput {
+  sourceWorkspaceId: string
+  name: string
+  academicPeriod: string
+  mode: WorkspaceDuplicateMode
 }
 
 export interface ClassGroup {
